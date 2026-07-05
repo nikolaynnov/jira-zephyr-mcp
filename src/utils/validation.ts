@@ -88,7 +88,29 @@ export const createTestCaseSchema = z.object({
 
 export const searchTestCasesSchema = z.object({
   projectKey: z.string().min(1, 'Project key is required'),
-  query: z.string().optional(),
+  // Free-text keyword match on summary/description (NOT a JQL string).
+  text: z.string().optional(),
+  // Exact label / component filters (AND-ed together, each is "any of").
+  labels: z.array(z.string().min(1)).optional(),
+  components: z.array(z.string().min(1)).optional(),
+  limit: z.number().min(1).max(100).default(50),
+});
+
+const executionStatusName = z.enum(['PASS', 'FAIL', 'WIP', 'BLOCKED', 'UNEXECUTED']);
+
+export const searchTestExecutionsSchema = z.object({
+  projectKey: z.string().min(1, 'Project key is required'),
+  // Structured filters -> ZQL clauses (ignored entirely if `zql` is provided).
+  labels: z.array(z.string().min(1)).optional(),
+  components: z.array(z.string().min(1)).optional(),
+  status: z.array(executionStatusName).optional(),
+  fixVersions: z.array(z.string().min(1)).optional(),
+  // cycleName ~ "..." (substring: e.g. "2026.2" matches Linux/Windows/приёмка).
+  cycleNameContains: z.string().optional(),
+  // cycleName IN (...) exact cycle names.
+  cycleNames: z.array(z.string().min(1)).optional(),
+  // Escape hatch: raw ZQL. When set, ALL structured params above are ignored.
+  zql: z.string().optional(),
   limit: z.number().min(1).max(100).default(50),
 });
 
@@ -118,6 +140,7 @@ export type LinkTestsToIssuesInput = z.infer<typeof linkTestsToIssuesSchema>;
 export type GenerateTestReportInput = z.infer<typeof generateTestReportSchema>;
 export type CreateTestCaseInput = z.infer<typeof createTestCaseSchema>;
 export type SearchTestCasesInput = z.infer<typeof searchTestCasesSchema>;
+export type SearchTestExecutionsInput = z.infer<typeof searchTestExecutionsSchema>;
 export type GetTestCaseInput = z.infer<typeof getTestCaseSchema>;
 export type GetTestCaseExecutionsInput = z.infer<typeof getTestCaseExecutionsSchema>;
 export type CreateMultipleTestCasesInput = z.infer<typeof createMultipleTestCasesSchema>;

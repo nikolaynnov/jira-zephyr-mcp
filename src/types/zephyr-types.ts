@@ -15,6 +15,17 @@ export const ZAPI_EXECUTION_STATUS: Record<string, string> = {
   '-1': 'UNEXECUTED',
 };
 
+// Reverse map (status name -> numeric id) used to build ZQL executionStatus
+// clauses. ZQL rejects the string names with HTTP 406, so callers pass
+// human-readable names that we translate to numeric codes.
+export const ZAPI_STATUS_NAME_TO_ID: Record<string, number> = {
+  PASS: 1,
+  FAIL: 2,
+  WIP: 3,
+  BLOCKED: 4,
+  UNEXECUTED: -1,
+};
+
 // ---- Raw ZAPI shapes ------------------------------------------------------
 
 export interface RawZapiCycle {
@@ -79,6 +90,63 @@ export interface RawZapiExecutionResponse {
   totalExecutions?: number;
   totalExecuted?: number;
   recordsCount?: number;
+}
+
+// GET /rest/zapi/latest/zql/executeSearch returns a different execution shape
+// than /execution: labels is a string[], components is an object[], status is
+// an object, and there is no executedOnVal (only executedOn/creationDate).
+export interface RawZqlComponent {
+  id?: number | string;
+  name?: string;
+}
+
+export interface RawZqlExecution {
+  id: number | string;
+  orderId?: number;
+  cycleId?: number | string;
+  cycleName?: string;
+  issueId?: number | string;
+  issueKey?: string;
+  issueSummary?: string;
+  labels?: string[];
+  projectKey?: string;
+  projectId?: number | string;
+  priority?: string;
+  components?: RawZqlComponent[];
+  versionId?: number | string;
+  versionName?: string;
+  status?: RawZapiStatus;
+  executionStatus?: number | string;
+  executedOn?: string;
+  creationDate?: string;
+  executedBy?: string;
+  executedByDisplay?: string;
+  comment?: string;
+  // Linked defects, returned inline by ZQL for failed/blocked executions.
+  // executionDefects are rich objects; stepDefects/testDefectsUnMasked are
+  // usually bare issue keys. Counts are provided separately by the server.
+  executionDefects?: RawZqlDefect[];
+  stepDefects?: Array<RawZqlDefect | string>;
+  testDefectsUnMasked?: Array<RawZqlDefect | string>;
+  totalDefectCount?: number;
+  executionDefectCount?: number;
+  stepDefectCount?: number;
+}
+
+export interface RawZqlDefect {
+  defectId?: number | string;
+  defectKey?: string;
+  defectSummary?: string;
+  defectStatus?: string;
+  defectResolutionId?: string;
+}
+
+export interface RawZqlExecutionResponse {
+  executions: RawZqlExecution[];
+  totalCount?: number;
+  executionsCount?: number;
+  currentIndex?: number;
+  maxResultsAllowed?: number;
 }
 
 export interface RawZapiTestStep {
@@ -149,6 +217,45 @@ export interface ZephyrTestExecution {
   cycleId?: string;
   cycleName?: string;
   versionName?: string;
+}
+
+// A single row returned by the ZQL execution search (search_test_executions).
+// Unlike ZephyrTestExecution it carries the test case's labels/components,
+// because ZQL returns them inline and testers filter/group on them.
+export interface ZephyrExecutionSearchRow {
+  id: string;
+  status: string;
+  statusName?: string;
+  issueId?: string;
+  issueKey?: string;
+  summary?: string;
+  labels: string[];
+  components: string[];
+  priority?: string;
+  cycleId?: string;
+  cycleName?: string;
+  versionName?: string;
+  executedOn?: string;
+  executedBy?: string;
+  // Distinct defect issue keys linked to this failed/blocked execution
+  // (merged from executionDefects, stepDefects, testDefectsUnMasked).
+  // Empty array when the execution has no linked defects.
+  defectKeys: string[];
+  defects: ZephyrLinkedDefect[];
+}
+
+export interface ZephyrLinkedDefect {
+  key: string;
+  summary?: string;
+  status?: string;
+  url?: string;
+}
+
+export interface ZephyrExecutionSearchResult {
+  total: number;
+  count: number;
+  zql: string;
+  executions: ZephyrExecutionSearchRow[];
 }
 
 export interface ZephyrTestStep {

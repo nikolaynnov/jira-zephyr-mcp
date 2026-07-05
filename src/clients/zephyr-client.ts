@@ -8,8 +8,15 @@ import {
   RawZapiStatus,
   RawZapiTestStepResponse,
   RawZapiVersionBoard,
+  RawZqlExecution,
+  RawZqlExecutionResponse,
+  RawZqlDefect,
   ZAPI_EXECUTION_STATUS,
+  ZAPI_STATUS_NAME_TO_ID,
+  ZephyrExecutionSearchResult,
+  ZephyrExecutionSearchRow,
   ZephyrExecutionSummary,
+  ZephyrLinkedDefect,
   ZephyrTestCase,
   ZephyrTestCycle,
   ZephyrTestExecution,
@@ -195,6 +202,137 @@ export class ZephyrClient {
     };
   }
 
+  // Server-side execution search via ZQL (Zephyr Query Language). ZQL runs
+  // against executions (not issues) and can filter by label/component/status/
+  // release/cycle in a single call. Syntax was validated live against the
+  // target server; see buildZql for the exact keyword/operator rules.
+  async searchTestExecutions(
+    projectKey: string,
+    options: {
+      labels?: string[];
+      components?: string[];
+      status?: string[];
+      fixVersions?: string[];
+      cycleNameContains?: string;
+      cycleNames?: string[];
+      zql?: string;
+    } = {},
+    limit = 50
+  ): Promise<ZephyrExecutionSearchResult> {
+    const zql = options.zql && options.zql.trim()
+      ? options.zql.trim()
+      : this.buildZql(projectKey, options);
+
+    const response = await this.zapi.get<RawZqlExecutionResponse>('/zql/executeSearch', {
+      params: { zqlQuery: zql, maxRecords: limit },
+    });
+    const rows = response.data?.executions || [];
+    const total = response.data?.totalCount ?? response.data?.executionsCount ?? rows.length;
+    return {
+      total,
+      count: rows.length,
+      zql,
+      // ZQL rows carry no executedOnVal, so keep the server's own order.
+      executions: rows.map(row => this.normalizeZqlExecution(row)),
+    };
+  }
+
+  // Build a ZQL query from structured filters. Rules verified live:
+  //  - labels/component/fixVersion use IN (...) for "any of" (exact match)
+  //  - executionStatus needs the NUMERIC code (names return HTTP 406)
+  //  - cycleName ~ "x" is substring; cycleName IN (...) is exact
+  private buildZql(
+    projectKey: string,
+    options: {
+      labels?: string[];
+      components?: string[];
+      status?: string[];
+      fixVersions?: string[];
+      cycleNameContains?: string;
+      cycleNames?: string[];
+    }
+  ): string {
+    const clauses = [`project = "${this.escapeJql(projectKey)}"`];
+
+    const inClause = (field: string, values?: string[]) => {
+      const list = (values || []).filter(v => v && v.trim());
+      if (list.length) {
+        clauses.push(`${field} IN (${list.map(v => `"${this.escapeJql(v)}"`).join(', ')})`);
+      }
+    };
+
+    inClause('labels', options.labels);
+    inClause('component', options.components);
+    inClause('fixVersion', options.fixVersions);
+    inClause('cycleName', options.cycleNames);
+
+    const statusIds = (options.status || [])
+      .map(name => ZAPI_STATUS_NAME_TO_ID[name])
+      .filter(id => id !== undefined);
+    if (statusIds.length) {
+      clauses.push(`executionStatus IN (${statusIds.join(', ')})`);
+    }
+
+    if (options.cycleNameContains && options.cycleNameContains.trim()) {
+      clauses.push(`cycleName ~ "${this.escapeJql(options.cycleNameContains)}"`);
+    }
+
+    return clauses.join(' AND ');
+  }
+
+  private normalizeZqlExecution(raw: RawZqlExecution): ZephyrExecutionSearchRow {
+    const statusId = raw.status?.id !== undefined
+      ? String(raw.status.id)
+      : String(raw.executionStatus ?? '');
+    const defects = this.collectDefects(raw);
+    return {
+      id: String(raw.id),
+      status: ZAPI_EXECUTION_STATUS[statusId] || raw.status?.name || statusId,
+      statusName: raw.status?.name,
+      issueId: raw.issueId !== undefined ? String(raw.issueId) : undefined,
+      issueKey: raw.issueKey,
+      summary: raw.issueSummary,
+      labels: raw.labels || [],
+      components: (raw.components || []).map(c => c?.name || '').filter(Boolean),
+      priority: raw.priority,
+      cycleId: raw.cycleId !== undefined ? String(raw.cycleId) : undefined,
+      cycleName: raw.cycleName,
+      versionName: raw.versionName,
+      executedOn: raw.executedOn || raw.creationDate || undefined,
+      executedBy: raw.executedByDisplay || raw.executedBy || undefined,
+      defectKeys: defects.map(d => d.key),
+      defects,
+    };
+  }
+
+  // Merge the three defect sources ZQL returns (executionDefects, stepDefects,
+  // testDefectsUnMasked) into a de-duplicated list of linked defect issues.
+  // Entries may be rich objects (defectKey/defectSummary/defectStatus) or bare
+  // issue-key strings, so both shapes are handled.
+  private collectDefects(raw: RawZqlExecution): ZephyrLinkedDefect[] {
+    const byKey = new Map<string, ZephyrLinkedDefect>();
+    const browseBase = `${getJiraBaseUrl()}/browse`;
+    const add = (entry: RawZqlDefect | string | undefined) => {
+      if (!entry) return;
+      const defect: ZephyrLinkedDefect = typeof entry === 'string'
+        ? { key: entry }
+        : { key: entry.defectKey || '', summary: entry.defectSummary, status: entry.defectStatus };
+      if (!defect.key) return;
+      defect.url = `${browseBase}/${defect.key}`;
+      const existing = byKey.get(defect.key);
+      if (!existing) {
+        byKey.set(defect.key, defect);
+      } else {
+        existing.summary = existing.summary || defect.summary;
+        existing.status = existing.status || defect.status;
+      }
+    };
+    (raw.executionDefects || []).forEach(add);
+    (raw.stepDefects || []).forEach(add);
+    (raw.testDefectsUnMasked || []).forEach(add);
+    return [...byKey.values()];
+  }
+
   async getTestExecutionSummary(
     cycleId: string,
     projectId?: string,
@@ -273,7 +411,11 @@ export class ZephyrClient {
 
   // ---- test cases (JIRA issues of the "Test" type) -----------------------
 
-  async searchTestCases(projectKey: string, query?: string, limit = 50): Promise<{
+  async searchTestCases(
+    projectKey: string,
+    options: { text?: string; labels?: string[]; components?: string[] } = {},
+    limit = 50
+  ): Promise<{
     testCases: ZephyrTestCase[];
     total: number;
   }> {
@@ -282,8 +424,19 @@ export class ZephyrClient {
     if (testIssueType) {
       clauses.push(`issuetype = "${testIssueType}"`);
     }
-    if (query && query.trim()) {
-      const escaped = query.replace(/"/g, '\\"');
+    // Exact label filter: labels IN ("a", "b") = "has any of these labels".
+    const labels = (options.labels || []).filter(l => l.trim());
+    if (labels.length) {
+      clauses.push(`labels IN (${labels.map(l => `"${this.escapeJql(l)}"`).join(', ')})`);
+    }
+    // Exact component filter: component IN (...).
+    const components = (options.components || []).filter(c => c.trim());
+    if (components.length) {
+      clauses.push(`component IN (${components.map(c => `"${this.escapeJql(c)}"`).join(', ')})`);
+    }
+    // Free-text keyword match (explicitly not JQL): scoped to summary/description.
+    if (options.text && options.text.trim()) {
+      const escaped = this.escapeJql(options.text);
       clauses.push(`(summary ~ "${escaped}" OR text ~ "${escaped}")`);
     }
     const jql = clauses.join(' AND ');
@@ -298,6 +451,10 @@ export class ZephyrClient {
     // results for performance; use get_test_case for the full test case.
     const testCases = issues.map(issue => this.issueToTestCase(issue, []));
     return { testCases, total };
+  }
+
+  private escapeJql(value: string): string {
+    return value.replace(/"/g, '\\"');
   }
 
   async getTestCase(testCaseId: string, includeExecutions = false): Promise<ZephyrTestCase> {
@@ -341,22 +498,28 @@ export class ZephyrClient {
   }
 
   // Execution history of a single Test issue across all cycles (newest-first).
-  // Accepts an issue key (e.g. QA-1246) or a numeric issue id.
+  // Accepts an issue key (e.g. QA-1246) or a numeric issue id. Labels/components
+  // are returned once at the top level (they belong to the test case, not to
+  // each run) so callers can filter by "modules" without a second lookup.
   async getTestCaseExecutions(testCaseId: string): Promise<{
     testCaseId: string;
     issueKey?: string;
     issueId: string;
+    labels: string[];
+    components: string[];
     total: number;
     lastExecution?: ZephyrTestExecution;
     executions: ZephyrTestExecution[];
   }> {
-    const issue = await this.jira.getIssue(testCaseId, ['summary']);
+    const issue = await this.jira.getIssue(testCaseId, ['summary', 'labels', 'components']);
     const issueId = String(issue.id);
     const executions = await this.getExecutionsForIssueId(issueId);
     return {
       testCaseId,
       issueKey: issue.key,
       issueId,
+      labels: issue.fields?.labels || [],
+      components: (issue.fields?.components || []).map((c: { name: string }) => c.name),
       total: executions.length,
       lastExecution: executions[0],
       executions,

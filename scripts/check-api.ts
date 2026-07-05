@@ -28,6 +28,8 @@ const ISSUE_KEY = process.env.PROBE_ISSUE_KEY || 'IPLUS-46358';
 const PROJECT_KEY = process.env.PROBE_PROJECT_KEY || 'QA';
 const PROJECT_ID_OVERRIDE = process.env.PROBE_PROJECT_ID || ''; // e.g. 10660 for QA
 const INSECURE_TLS = /^(1|true|yes)$/i.test(process.env.PROBE_INSECURE_TLS || '');
+// A label expected to exist on some Test issues, used to validate JQL label filtering.
+const PROBE_LABEL = process.env.PROBE_LABEL || 'modules';
 // JIRA is usually an internal host that must be reached directly. axios otherwise
 // routes through the corporate forward proxy (HTTP(S)_PROXY env) which cannot reach
 // internal hosts and returns 502. Bypass it by default; opt back in with PROBE_USE_PROXY=1.
@@ -196,6 +198,34 @@ const main = async (): Promise<void> => {
     return { http: status, note: `${data.total ?? 0} issue(s) for jql` };
   });
 
+  // 4b. search by label via native JQL — proves exact label filtering is one clause away.
+  //     This is the cheap alternative to fuzzy `summary ~ ...` full-text search.
+  const labelJql = testIssueType
+    ? `project = ${PROJECT_KEY} AND issuetype = "${testIssueType}" AND labels = "${PROBE_LABEL}"`
+    : `project = ${PROJECT_KEY} AND labels = "${PROBE_LABEL}"`;
+  await probe('search by label (JQL labels=)', `GET /rest/api/2/search (labels = ${PROBE_LABEL})`, async () => {
+    const { data, status } = await http.get('/rest/api/2/search', {
+      params: { jql: labelJql, maxResults: 3, fields: 'summary,labels,components' },
+    });
+    const first = data.issues?.[0];
+    const lbls = first ? (first.fields?.labels ?? []).join('|') : 'none';
+    return { http: status, note: `${data.total ?? 0} issue(s) with label ${PROBE_LABEL}; sample labels: ${lbls}` };
+  });
+
+  // 4c. Reproduce what search_test_cases builds TODAY when a user passes
+  //     query="labels = modules": the tool wraps it as full-text, so it searches
+  //     for the literal phrase in summary/text -> 0 hits. Demonstrates the root
+  //     cause of the tester's "labels = modules returned 0" complaint.
+  const wrappedJql = testIssueType
+    ? `project = ${PROJECT_KEY} AND issuetype = "${testIssueType}" AND (summary ~ "labels = ${PROBE_LABEL}" OR text ~ "labels = ${PROBE_LABEL}")`
+    : `project = ${PROJECT_KEY} AND (summary ~ "labels = ${PROBE_LABEL}" OR text ~ "labels = ${PROBE_LABEL}")`;
+  await probe('search_test_cases wrap (current)', `GET /rest/api/2/search (query wrapped as full-text)`, async () => {
+    const { data, status } = await http.get('/rest/api/2/search', {
+      params: { jql: wrappedJql, maxResults: 3, fields: 'summary' },
+    });
+    return { http: status, note: `${data.total ?? 0} issue(s) — this is why "labels = ${PROBE_LABEL}" returns 0` };
+  });
+
   // ---- ZAPI (Zephyr for JIRA / Squad Server) ----
   if (!projectId) {
     skip(
@@ -327,6 +357,126 @@ const main = async (): Promise<void> => {
       'GET /rest/zapi/latest/execution?issueId=...',
       'no Test issue found to probe'
     );
+  }
+
+  // 10. ZQL execution search — the potential one-call answer to
+  //     "executions with label=X and status=FAIL in cycle/version Y".
+  //     ZQL is Zephyr's own query language (distinct from Jira's JQL) and runs
+  //     against executions, not issues. If this endpoint exists we can push
+  //     label/status/fixVersion filtering to the server instead of paging
+  //     whole cycles and filtering client-side.
+  if (projectId) {
+    const runZql = async (zqlQuery: string) => {
+      const { data, status } = await http.get('/rest/zapi/latest/zql/executeSearch', {
+        params: { zqlQuery, maxRecords: 50 },
+      });
+      const execs = data?.executions ?? [];
+      const total = data?.totalCount ?? data?.executionsCount ?? execs.length;
+      const fields = execs[0] ? Object.keys(execs[0]).join(',') : 'none';
+      return { total, fields, execs, http: status };
+    };
+    const tryZql = async (label: string, clause: string) => {
+      await probe(`ZQL (${label})`, `GET zql/executeSearch (${clause})`, async () => {
+        try {
+          const r = await runZql(`project = "${PROJECT_KEY}" AND ${clause}`);
+          return { http: r.http, note: `${r.total} execution(s)` };
+        } catch (e: any) {
+          const msg = e?.response?.data?.errorDesc || e?.response?.data?.clauseQueryResult || e?.message;
+          return { http: e?.response?.status ?? 0, note: `error: ${String(msg).slice(0, 90)}` };
+        }
+      });
+    };
+    // 10a. bare project ZQL — confirms the endpoint works and lets us harvest
+    //      real cycleName/component values to test operator behavior against.
+    let sampleCycleName = '';
+    let sampleComponents: string[] = [];
+    await probe('ZQL (project only)', 'GET /rest/zapi/latest/zql/executeSearch (project)', async () => {
+      const r = await runZql(`project = "${PROJECT_KEY}"`);
+      for (const ex of r.execs) {
+        if (!sampleCycleName && ex.cycleName) sampleCycleName = ex.cycleName;
+        const comps = Array.isArray(ex.components)
+          ? ex.components.map((c: any) => c?.name ?? c).filter(Boolean)
+          : [];
+        for (const c of comps) if (!sampleComponents.includes(c)) sampleComponents.push(c);
+      }
+      return {
+        http: r.http,
+        note: `${r.total} exec; sample cycleName="${sampleCycleName}"; components=[${sampleComponents.slice(0, 4).join(', ')}]`,
+      };
+    });
+    // 10b. Discovered ZQL syntax (validated live against the target server):
+    //      - label keyword is `labels` (plural), NOT Jira's-looking `label`
+    //      - status keyword is `executionStatus` with the NUMERIC code
+    //        (1=PASS, 2=FAIL, 3=WIP, 4=BLOCKED, -1=UNEXECUTED); string names -> 406
+    //      - `fixVersion` filters by release; clauses combine with AND/IN
+    //      The tester's whole question ("label=modules not-run OR failed") is one call.
+    for (const clause of [
+      `labels = "${PROBE_LABEL}"`,
+      `executionStatus = 2`,
+      `fixVersion = "2026.2"`,
+      `labels = "${PROBE_LABEL}" AND executionStatus IN (-1, 2)`,
+    ]) {
+      await probe(`ZQL (${clause})`, `GET zql/executeSearch (${clause})`, async () => {
+        try {
+          const r = await runZql(`project = "${PROJECT_KEY}" AND ${clause}`);
+          return { http: r.http, note: `${r.total} execution(s)` };
+        } catch (e: any) {
+          const msg = e?.response?.data?.errorDesc || e?.response?.data?.clauseQueryResult || e?.message;
+          return { http: e?.response?.status ?? 0, note: `error: ${String(msg).slice(0, 80)}` };
+        }
+      });
+    }
+
+    // 10c. QUESTION: is cycleName exact or contains/full-text?
+    //      Compare `=` (exact) vs `~` (contains) vs a partial value "2026.2".
+    //      If "2026.2" with `=` returns 0 but `~` returns many -> it's contains.
+    if (sampleCycleName) {
+      await tryZql('cycleName = <exact>', `cycleName = "${sampleCycleName}"`);
+    }
+    await tryZql('cycleName = "2026.2" (partial, exact op)', `cycleName = "2026.2"`);
+    await tryZql('cycleName ~ "2026.2" (contains op)', `cycleName ~ "2026.2"`);
+
+    // 10d. QUESTION: can component take multiple values (IN / array)?
+    //      Test single `=`, `IN (a, b)`, and `~` contains behavior.
+    if (sampleComponents.length) {
+      await tryZql('component = <single>', `component = "${sampleComponents[0]}"`);
+      if (sampleComponents.length >= 2) {
+        await tryZql('component IN (a, b)', `component IN ("${sampleComponents[0]}", "${sampleComponents[1]}")`);
+      }
+      await tryZql('component ~ <partial>', `component ~ "${sampleComponents[0].slice(0, 3)}"`);
+    }
+    // multi-value labels and fixVersion via IN (relevant to array params)
+    await tryZql('labels IN (a, b)', `labels IN ("${PROBE_LABEL}", "smoke")`);
+    await tryZql('fixVersion IN (a, b)', `fixVersion IN ("2026.2", "2026.1")`);
+    // cycleName IN with two exact names (Windows + Linux scenario needs multi-cycle)
+    if (sampleComponents.length >= 2) {
+      await tryZql('component IN (a, b) [retry]', `component IN ("${sampleComponents[0]}", "${sampleComponents[1]}")`);
+    }
+
+    // 10e. QUESTION (linked defects): does ZQL return defect issue keys for a
+    //      FAILED execution? Needed to answer "linked defects / links to them".
+    //      Find a failed modules execution and dump its defect-related fields.
+    await probe('ZQL defect fields (dump)', 'GET zql/executeSearch (failed modules -> defects)', async () => {
+      const r = await runZql(`project = "${PROJECT_KEY}" AND labels = "${PROBE_LABEL}" AND executionStatus = 2`);
+      const withDefects = r.execs.find((e: any) => (e.totalDefectCount ?? 0) > 0) || r.execs[0];
+      if (withDefects) {
+        console.log('\n--- ZQL failed-execution defect fields ---');
+        console.log(JSON.stringify({
+          issueKey: withDefects.issueKey,
+          totalDefectCount: withDefects.totalDefectCount,
+          executionDefectCount: withDefects.executionDefectCount,
+          stepDefectCount: withDefects.stepDefectCount,
+          executionDefects: withDefects.executionDefects,
+          stepDefects: withDefects.stepDefects,
+          testDefectsUnMasked: withDefects.testDefectsUnMasked,
+        }, null, 2));
+        console.log('--- end defect fields ---\n');
+      }
+      const found = r.execs.filter((e: any) => (e.totalDefectCount ?? 0) > 0).length;
+      return { http: r.http, note: `${r.total} failed; ${found}/${r.execs.length} sampled rows have defects` };
+    });
+  } else {
+    skip('ZQL execution search', 'GET /rest/zapi/latest/zql/executeSearch', 'no projectId');
   }
 
   // ---- summary ----

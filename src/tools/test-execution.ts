@@ -2,9 +2,11 @@ import { ZephyrClient } from '../clients/zephyr-client.js';
 import {
   getTestExecutionStatusSchema,
   listTestCycleExecutionsSchema,
+  searchTestExecutionsSchema,
   generateTestReportSchema,
   GetTestExecutionStatusInput,
   ListTestCycleExecutionsInput,
+  SearchTestExecutionsInput,
   GenerateTestReportInput,
 } from '../utils/validation.js';
 import { readOnlyIteration } from '../utils/tool-status.js';
@@ -87,6 +89,41 @@ export const listTestCycleExecutions = async (input: ListTestCycleExecutionsInpu
           executedBy: execution.executedBy,
           comment: execution.comment,
         })),
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message,
+    };
+  }
+};
+
+export const searchTestExecutions = async (input: SearchTestExecutionsInput) => {
+  const validatedInput = searchTestExecutionsSchema.parse(input);
+
+  try {
+    const result = await getZephyrClient().searchTestExecutions(
+      validatedInput.projectKey,
+      {
+        labels: validatedInput.labels,
+        components: validatedInput.components,
+        status: validatedInput.status,
+        fixVersions: validatedInput.fixVersions,
+        cycleNameContains: validatedInput.cycleNameContains,
+        cycleNames: validatedInput.cycleNames,
+        zql: validatedInput.zql,
+      },
+      validatedInput.limit
+    );
+
+    return {
+      success: true,
+      data: {
+        total: result.total,
+        count: result.count,
+        zql: result.zql,
+        executions: result.executions,
       },
     };
   } catch (error: any) {

@@ -42,7 +42,11 @@ export const searchTestCases = async (input: SearchTestCasesInput) => {
   try {
     const result = await getZephyrClient().searchTestCases(
       validatedInput.projectKey,
-      validatedInput.query,
+      {
+        text: validatedInput.text,
+        labels: validatedInput.labels,
+        components: validatedInput.components,
+      },
       validatedInput.limit
     );
 
@@ -126,6 +130,9 @@ export const getTestCaseExecutions = async (input: GetTestCaseExecutionsInput) =
       data: {
         testCaseId: result.testCaseId,
         issueKey: result.issueKey,
+        issueId: result.issueId,
+        labels: result.labels,
+        components: result.components,
         total: result.total,
         lastExecution: result.lastExecution ? toExecutionView(result.lastExecution) : null,
         executions: result.executions.map(toExecutionView),

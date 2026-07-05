@@ -14,6 +14,7 @@ import {
   executeTest,
   getTestExecutionStatus,
   listTestCycleExecutions,
+  searchTestExecutions,
   linkTestsToIssues,
   generateTestReport,
 } from './tools/test-execution.js';
@@ -33,6 +34,7 @@ import {
   executeTestSchema,
   getTestExecutionStatusSchema,
   listTestCycleExecutionsSchema,
+  searchTestExecutionsSchema,
   linkTestsToIssuesSchema,
   generateTestReportSchema,
   createTestCaseSchema,
@@ -48,6 +50,7 @@ import {
   ExecuteTestInput,
   GetTestExecutionStatusInput,
   ListTestCycleExecutionsInput,
+  SearchTestExecutionsInput,
   LinkTestsToIssuesInput,
   GenerateTestReportInput,
   CreateTestCaseInput,
@@ -250,12 +253,14 @@ const TOOLS = [
   },
   {
     name: 'search_test_cases',
-    description: 'Search test cases (JIRA issues of the Test type) in a project',
+    description: 'Search test cases (JIRA issues of the Test type) in a project using structured filters. All filters are optional and combine with AND. Note: `text` is a free-text keyword match on summary/description (NOT JQL); use `labels`/`components` for exact filtering.',
     inputSchema: {
       type: 'object',
       properties: {
         projectKey: { type: 'string', description: 'JIRA project key' },
-        query: { type: 'string', description: 'Search query (optional)' },
+        text: { type: 'string', description: 'Free-text keyword match on summary/description (optional, NOT a JQL string)' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Exact label filter — matches test cases having ANY of these labels (optional)' },
+        components: { type: 'array', items: { type: 'string' }, description: 'Exact component filter — matches test cases having ANY of these components (optional)' },
         limit: { type: 'number', description: 'Maximum number of results (default: 50)' },
       },
       required: ['projectKey'],
@@ -275,13 +280,32 @@ const TOOLS = [
   },
   {
     name: 'get_test_case_executions',
-    description: 'Get the execution history of a single test case across all cycles (newest first): status, executed date, executor, cycle and version/release. Use this to answer "when was this test last run and for which release?".',
+    description: 'Get the execution history of a single test case across all cycles (newest first): status, executed date, executor, cycle and version/release. Also returns the test case labels and components once at the top level. Use this to answer "when was this test last run and for which release?".',
     inputSchema: {
       type: 'object',
       properties: {
         testCaseId: { type: 'string', description: 'Test case issue key (e.g. QA-1246) or issue id' },
       },
       required: ['testCaseId'],
+    },
+  },
+  {
+    name: 'search_test_executions',
+    description: 'Search test EXECUTIONS (runs) server-side via ZQL (Zephyr Query Language), which queries executions rather than issues. Answers questions like "which tests with label=modules failed or were not run in release 2026.2 (Windows and Linux)" in a SINGLE call. All structured filters are optional and combine with AND; array filters match ANY of their values. Each returned execution includes any LINKED DEFECTS (defectKeys + defects[] with key/summary/status), so you can jump straight from a failed run to its bug reports without extra calls. IMPORTANT: if `zql` is provided, ALL structured filters are ignored and the raw ZQL is used as-is.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectKey: { type: 'string', description: 'JIRA project key (required unless a fully-qualified zql is given, but still recommended)' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Match executions of test cases having ANY of these labels (exact)' },
+        components: { type: 'array', items: { type: 'string' }, description: 'Match ANY of these components (exact)' },
+        status: { type: 'array', items: { type: 'string', enum: ['PASS', 'FAIL', 'WIP', 'BLOCKED', 'UNEXECUTED'] }, description: 'Match ANY of these execution statuses (human names are translated to Zephyr numeric codes)' },
+        fixVersions: { type: 'array', items: { type: 'string' }, description: 'Match ANY of these fix versions / releases (exact, e.g. "2026.2")' },
+        cycleNameContains: { type: 'string', description: 'Substring match on cycle name, e.g. "2026.2" matches "Linux ... 2026.2", "Windows ... 2026.2"' },
+        cycleNames: { type: 'array', items: { type: 'string' }, description: 'Exact cycle names (use when you know the full cycle titles)' },
+        zql: { type: 'string', description: 'Raw ZQL escape hatch for power users. When set, this takes PRIORITY and all structured filters above are IGNORED. Example: project = "QA" AND labels = "modules" AND executionStatus IN (-1, 2)' },
+        limit: { type: 'number', description: 'Maximum number of executions to return (default: 50)' },
+      },
+      required: ['projectKey'],
     },
   },
   {
@@ -453,6 +477,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: JSON.stringify(await listTestCycleExecutions(validatedArgs), null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'search_test_executions': {
+        const validatedArgs = validateInput<SearchTestExecutionsInput>(searchTestExecutionsSchema, args, 'search_test_executions');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(await searchTestExecutions(validatedArgs), null, 2),
             },
           ],
         };
