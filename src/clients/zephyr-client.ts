@@ -1,336 +1,316 @@
 import axios, { AxiosInstance } from 'axios';
-import { getZephyrHeaders } from '../utils/config.js';
+import { getHttpClientOptions, getJiraBaseUrl } from '../utils/config.js';
+import { JiraClient } from './jira-client.js';
 import {
-  ZephyrTestPlan,
+  RawZapiCycle,
+  RawZapiExecution,
+  RawZapiExecutionResponse,
+  RawZapiStatus,
+  RawZapiTestStepResponse,
+  RawZapiVersionBoard,
+  ZAPI_EXECUTION_STATUS,
+  ZephyrExecutionSummary,
+  ZephyrTestCase,
   ZephyrTestCycle,
   ZephyrTestExecution,
-  ZephyrTestCase,
   ZephyrTestReport,
-  ZephyrExecutionSummary,
+  ZephyrTestStep,
 } from '../types/zephyr-types.js';
 
+// Read-only client for Zephyr for JIRA 5.6.3 (Zephyr Squad Server) via ZAPI.
+// ZAPI is hosted on the same JIRA instance under /rest/zapi/latest and shares
+// the JIRA session, so it reuses the JIRA auth/HTTP options and a JiraClient for
+// project / issue / issue-type resolution.
 export class ZephyrClient {
-  private client: AxiosInstance;
+  private zapi: AxiosInstance;
+  private jira: JiraClient;
 
-  constructor() {
-    this.client = axios.create({
-      baseURL: 'https://api.zephyrscale.smartbear.com/v2',
-      headers: getZephyrHeaders(),
-      timeout: 30000,
+  constructor(jira?: JiraClient) {
+    this.jira = jira ?? new JiraClient();
+    this.zapi = axios.create({
+      baseURL: `${getJiraBaseUrl()}/rest/zapi/latest`,
+      ...getHttpClientOptions(),
     });
   }
 
-  async createTestPlan(data: {
-    name: string;
-    description?: string;
-    projectKey: string;
-    startDate?: string;
-    endDate?: string;
-  }): Promise<ZephyrTestPlan> {
-    const payload = {
-      name: data.name,
-      objective: data.description,
-      projectKey: data.projectKey,
-      plannedStartDate: data.startDate,
-      plannedEndDate: data.endDate,
-    };
-
-    const response = await this.client.post('/testplans', payload);
-    return response.data;
-  }
-
-  async getTestPlans(projectKey: string, limit = 50, offset = 0): Promise<{
-    testPlans: ZephyrTestPlan[];
-    total: number;
-  }> {
-    const params = {
-      projectKey,
-      maxResults: limit,
-      startAt: offset,
-    };
-
-    const response = await this.client.get('/testplans', { params });
-    return {
-      testPlans: response.data.values || response.data,
-      total: response.data.total || response.data.length,
-    };
-  }
-
-  async createTestCycle(data: {
-    name: string;
-    description?: string;
-    projectKey: string;
-    versionId: string;
-    environment?: string;
-    startDate?: string;
-    endDate?: string;
-  }): Promise<ZephyrTestCycle> {
-    const payload = {
-      name: data.name,
-      description: data.description,
-      projectKey: data.projectKey,
-      versionId: data.versionId,
-      environment: data.environment,
-      plannedStartDate: data.startDate,
-      plannedEndDate: data.endDate,
-    };
-
-    const response = await this.client.post('/testcycles', payload);
-    return response.data;
-  }
+  // ---- test cycles -------------------------------------------------------
 
   async getTestCycles(projectKey: string, versionId?: string, limit = 50): Promise<{
     testCycles: ZephyrTestCycle[];
     total: number;
   }> {
-    const params = {
-      projectKey,
-      versionId,
-      maxResults: limit,
-    };
+    const projectId = await this.jira.resolveProjectId(projectKey);
+    const versionIds = versionId
+      ? [versionId]
+      : await this.getVersionIds(projectId);
 
-    const response = await this.client.get('/testcycles', { params });
-    return {
-      testCycles: response.data.values || response.data,
-      total: response.data.total || response.data.length,
-    };
-  }
-
-  async getTestExecution(executionId: string): Promise<ZephyrTestExecution> {
-    const response = await this.client.get(`/testexecutions/${executionId}`);
-    return response.data;
-  }
-
-  async updateTestExecution(data: {
-    executionId: string;
-    status: 'PASS' | 'FAIL' | 'WIP' | 'BLOCKED';
-    comment?: string;
-    defects?: string[];
-  }): Promise<ZephyrTestExecution> {
-    const payload = {
-      status: data.status,
-      comment: data.comment,
-      issues: data.defects?.map(key => ({ key })),
-    };
-
-    const response = await this.client.put(`/testexecutions/${data.executionId}`, payload);
-    return response.data;
-  }
-
-  async getTestExecutionSummary(cycleId: string): Promise<ZephyrExecutionSummary> {
-    const response = await this.client.get(`/testcycles/${cycleId}/testexecutions`);
-    const executions = response.data.values;
-
-    const summary = executions.reduce(
-      (acc: any, execution: any) => {
-        acc.total++;
-        switch (execution.status) {
-          case 'PASS':
-            acc.passed++;
-            break;
-          case 'FAIL':
-            acc.failed++;
-            break;
-          case 'BLOCKED':
-            acc.blocked++;
-            break;
-          case 'WIP':
-            acc.inProgress++;
-            break;
-          default:
-            acc.notExecuted++;
-        }
-        return acc;
-      },
-      { total: 0, passed: 0, failed: 0, blocked: 0, inProgress: 0, notExecuted: 0 }
-    );
-
-    summary.passRate = summary.total > 0 ? (summary.passed / summary.total) * 100 : 0;
-    return summary;
-  }
-
-  async linkTestCaseToIssue(testCaseId: string, issueKey: string): Promise<void> {
-    const payload = {
-      issueKeys: [issueKey],
-    };
-
-    await this.client.post(`/testcases/${testCaseId}/links`, payload);
-  }
-
-  async generateTestReport(cycleId: string): Promise<ZephyrTestReport> {
-    const cycleResponse = await this.client.get(`/testcycles/${cycleId}`);
-    const cycle = cycleResponse.data;
-
-    const executionsResponse = await this.client.get(`/testcycles/${cycleId}/testexecutions`);
-    const executions = executionsResponse.data.values || executionsResponse.data;
-
-    const summary = await this.getTestExecutionSummary(cycleId);
-
-    return {
-      cycleId,
-      cycleName: cycle.name,
-      projectKey: cycle.projectKey,
-      summary,
-      executions,
-      generatedOn: new Date().toISOString(),
-    };
-  }
-
-  async getTestCase(testCaseId: string): Promise<ZephyrTestCase> {
-    const response = await this.client.get(`/testcases/${testCaseId}`);
-    return response.data;
-  }
-
-  async searchTestCases(projectKey: string, query?: string, limit = 50): Promise<{
-    testCases: ZephyrTestCase[];
-    total: number;
-  }> {
-    const params = {
-      projectKey,
-      query,
-      maxResults: limit,
-    };
-
-    const response = await this.client.get('/testcases/search', { params });
-    return {
-      testCases: response.data.values || response.data,
-      total: response.data.total || response.data.length,
-    };
-  }
-
-  async createTestCase(data: {
-    projectKey: string;
-    name: string;
-    objective?: string;
-    precondition?: string;
-    estimatedTime?: number;
-    priority?: string;
-    status?: string;
-    folderId?: string;
-    labels?: string[];
-    componentId?: string;
-    customFields?: Record<string, any>;
-    testScript?: {
-      type: 'STEP_BY_STEP' | 'PLAIN_TEXT';
-      steps?: Array<{
-        index: number;
-        description: string;
-        testData?: string;
-        expectedResult: string;
-      }>;
-      text?: string;
-    };
-  }): Promise<ZephyrTestCase> {
-    const payload: any = {
-      projectKey: data.projectKey,
-      name: data.name,
-      objective: data.objective,
-      precondition: data.precondition,
-      estimatedTime: data.estimatedTime,
-    };
-
-    if (data.priority) {
-      payload.priority = data.priority;
-    }
-
-    if (data.status) {
-      payload.status = data.status;
-    }
-
-    if (data.folderId) {
-      payload.folderId = data.folderId;
-    }
-
-    if (data.labels && data.labels.length > 0) {
-      payload.labels = data.labels;
-    }
-
-    if (data.componentId) {
-      payload.componentId = data.componentId;
-    }
-
-    if (data.customFields) {
-      payload.customFields = data.customFields;
-    }
-
-    if (data.testScript) {
-      payload.testScript = data.testScript;
-    }
-
-    const response = await this.client.post('/testcases', payload);
-    return response.data;
-  }
-
-  async createMultipleTestCases(testCases: Array<{
-    projectKey: string;
-    name: string;
-    objective?: string;
-    precondition?: string;
-    estimatedTime?: number;
-    priority?: string;
-    status?: string;
-    folderId?: string;
-    labels?: string[];
-    componentId?: string;
-    customFields?: Record<string, any>;
-    testScript?: {
-      type: 'STEP_BY_STEP' | 'PLAIN_TEXT';
-      steps?: Array<{
-        index: number;
-        description: string;
-        testData?: string;
-        expectedResult: string;
-      }>;
-      text?: string;
-    };
-  }>, continueOnError = true): Promise<{
-    results: Array<{
-      index: number;
-      success: boolean;
-      data?: ZephyrTestCase;
-      error?: string;
-    }>;
-    summary: {
-      total: number;
-      successful: number;
-      failed: number;
-    };
-  }> {
-    const results = [];
-    let successful = 0;
-    let failed = 0;
-
-    for (let i = 0; i < testCases.length; i++) {
-      try {
-        const testCase = await this.createTestCase(testCases[i]);
-        results.push({
-          index: i,
-          success: true,
-          data: testCase,
-        });
-        successful++;
-      } catch (error: any) {
-        const errorMessage = error.response?.data?.message || error.message;
-        results.push({
-          index: i,
-          success: false,
-          error: errorMessage,
-        });
-        failed++;
-
-        if (!continueOnError) {
+    const testCycles: ZephyrTestCycle[] = [];
+    for (const vId of versionIds) {
+      if (testCycles.length >= limit) {
+        break;
+      }
+      const cycles = await this.getCyclesForVersion(projectId, vId);
+      for (const cycle of cycles) {
+        testCycles.push(cycle);
+        if (testCycles.length >= limit) {
           break;
         }
       }
     }
 
+    // Enrich each listed cycle with its execution status breakdown.
+    for (const cycle of testCycles) {
+      cycle.executionSummary = await this.getTestExecutionSummary(
+        cycle.id,
+        projectId,
+        cycle.versionId
+      );
+    }
+
+    return { testCycles, total: testCycles.length };
+  }
+
+  async getTestCycle(cycleId: string, projectKey?: string): Promise<ZephyrTestCycle | null> {
+    // ZAPI has no "get cycle by id" endpoint; scan the project's cycles.
+    if (!projectKey) {
+      return null;
+    }
+    const projectId = await this.jira.resolveProjectId(projectKey);
+    const versionIds = await this.getVersionIds(projectId);
+    for (const vId of versionIds) {
+      const cycles = await this.getCyclesForVersion(projectId, vId);
+      const match = cycles.find(c => c.id === String(cycleId));
+      if (match) {
+        match.executionSummary = await this.getTestExecutionSummary(match.id, projectId, match.versionId);
+        return match;
+      }
+    }
+    return null;
+  }
+
+  private async getVersionIds(projectId: string): Promise<string[]> {
+    const response = await this.zapi.get<RawZapiVersionBoard>('/util/versionBoard-list', {
+      params: { projectId },
+    });
+    const board = response.data || {};
+    const options = [
+      ...(board.unreleasedVersions || []),
+      ...(board.releasedVersions || []),
+    ];
+    const ids = options.map(v => String(v.value));
+    // Always include the "Unscheduled" version (-1) even if the board omits it.
+    if (!ids.includes('-1')) {
+      ids.unshift('-1');
+    }
+    return Array.from(new Set(ids));
+  }
+
+  private async getCyclesForVersion(projectId: string, versionId: string): Promise<ZephyrTestCycle[]> {
+    const response = await this.zapi.get<Record<string, unknown>>('/cycle', {
+      params: { projectId, versionId },
+    });
+    const data = response.data || {};
+    const cycles: ZephyrTestCycle[] = [];
+    for (const [cycleId, value] of Object.entries(data)) {
+      // The map mixes cycle objects with scalar meta keys (e.g. recordsCount).
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      cycles.push(this.normalizeCycle(cycleId, value as RawZapiCycle));
+    }
+    return cycles;
+  }
+
+  private normalizeCycle(cycleId: string, raw: RawZapiCycle): ZephyrTestCycle {
     return {
-      results,
-      summary: {
-        total: testCases.length,
-        successful,
-        failed,
-      },
+      id: String(cycleId),
+      name: raw.name || '',
+      description: raw.description || undefined,
+      projectId: raw.projectId !== undefined ? String(raw.projectId) : '',
+      projectKey: raw.projectKey,
+      versionId: raw.versionId !== undefined ? String(raw.versionId) : '',
+      versionName: raw.versionName,
+      environment: raw.environment || undefined,
+      build: raw.build || undefined,
+      totalExecutions: raw.totalCycleExecutions ?? raw.totalExecutions ?? 0,
+      totalExecuted: raw.totalExecuted ?? 0,
+      createdBy: raw.createdByDisplay || raw.createdBy,
+      createdOn: raw.createdDate || undefined,
+      executionSummary: this.emptySummary(),
+    };
+  }
+
+  // ---- executions --------------------------------------------------------
+
+  private async fetchExecutions(
+    cycleId: string,
+    projectId?: string,
+    versionId?: string
+  ): Promise<{ executions: RawZapiExecution[]; statusMap: Record<string, RawZapiStatus> }> {
+    const params: Record<string, string | number> = { cycleId };
+    if (projectId) params.projectId = projectId;
+    if (versionId !== undefined) params.versionId = versionId;
+
+    const response = await this.zapi.get<RawZapiExecutionResponse>('/execution', { params });
+    return {
+      executions: response.data?.executions || [],
+      statusMap: response.data?.status || {},
+    };
+  }
+
+  async getTestExecutionSummary(
+    cycleId: string,
+    projectId?: string,
+    versionId?: string
+  ): Promise<ZephyrExecutionSummary> {
+    const { executions } = await this.fetchExecutions(cycleId, projectId, versionId);
+    return this.summarizeExecutions(executions);
+  }
+
+  async generateTestReport(cycleId: string): Promise<ZephyrTestReport> {
+    const { executions, statusMap } = await this.fetchExecutions(cycleId);
+    const normalized = executions.map(e => this.normalizeExecution(e, statusMap));
+    const first = executions[0];
+
+    return {
+      cycleId: String(cycleId),
+      cycleName: first?.cycleName,
+      projectId: first?.projectId !== undefined ? String(first.projectId) : undefined,
+      versionName: first?.versionName,
+      summary: this.summarizeExecutions(executions),
+      executions: normalized,
+      generatedOn: new Date().toISOString(),
+    };
+  }
+
+  private normalizeExecution(
+    raw: RawZapiExecution,
+    statusMap: Record<string, RawZapiStatus>
+  ): ZephyrTestExecution {
+    const statusId = String(raw.executionStatus);
+    return {
+      id: String(raw.id),
+      status: ZAPI_EXECUTION_STATUS[statusId] || statusId,
+      statusName: statusMap[statusId]?.name,
+      issueId: raw.issueId !== undefined ? String(raw.issueId) : undefined,
+      issueKey: raw.issueKey,
+      summary: raw.summary,
+      comment: raw.comment || undefined,
+      executedOn: raw.executedOn || undefined,
+      executedBy: raw.executedByDisplay || raw.executedBy,
+      cycleId: raw.cycleId !== undefined ? String(raw.cycleId) : undefined,
+      cycleName: raw.cycleName,
+      versionName: raw.versionName,
+    };
+  }
+
+  private summarizeExecutions(executions: RawZapiExecution[]): ZephyrExecutionSummary {
+    const summary = this.emptySummary();
+    for (const execution of executions) {
+      summary.total++;
+      const status = ZAPI_EXECUTION_STATUS[String(execution.executionStatus)];
+      switch (status) {
+        case 'PASS':
+          summary.passed++;
+          break;
+        case 'FAIL':
+          summary.failed++;
+          break;
+        case 'BLOCKED':
+          summary.blocked++;
+          break;
+        case 'WIP':
+          summary.inProgress++;
+          break;
+        default:
+          summary.notExecuted++;
+      }
+    }
+    summary.passRate = summary.total > 0 ? (summary.passed / summary.total) * 100 : 0;
+    return summary;
+  }
+
+  private emptySummary(): ZephyrExecutionSummary {
+    return { total: 0, passed: 0, failed: 0, blocked: 0, inProgress: 0, notExecuted: 0, passRate: 0 };
+  }
+
+  // ---- test cases (JIRA issues of the "Test" type) -----------------------
+
+  async searchTestCases(projectKey: string, query?: string, limit = 50): Promise<{
+    testCases: ZephyrTestCase[];
+    total: number;
+  }> {
+    const testIssueType = await this.jira.resolveTestIssueType();
+    const clauses = [`project = "${projectKey}"`];
+    if (testIssueType) {
+      clauses.push(`issuetype = "${testIssueType}"`);
+    }
+    if (query && query.trim()) {
+      const escaped = query.replace(/"/g, '\\"');
+      clauses.push(`(summary ~ "${escaped}" OR text ~ "${escaped}")`);
+    }
+    const jql = clauses.join(' AND ');
+
+    const { issues, total } = await this.jira.searchIssues(
+      jql,
+      ['summary', 'status', 'priority', 'labels', 'components', 'project', 'created', 'issuetype'],
+      limit
+    );
+
+    // Steps require a per-issue ZAPI call, so they are omitted from search
+    // results for performance; use get_test_case for the full test case.
+    const testCases = issues.map(issue => this.issueToTestCase(issue, []));
+    return { testCases, total };
+  }
+
+  async getTestCase(testCaseId: string): Promise<ZephyrTestCase> {
+    const issue = await this.jira.getIssue(testCaseId, [
+      'summary',
+      'description',
+      'status',
+      'priority',
+      'labels',
+      'components',
+      'project',
+      'created',
+      'issuetype',
+    ]);
+
+    let steps: ZephyrTestStep[] = [];
+    try {
+      const response = await this.zapi.get<RawZapiTestStepResponse>(`/teststep/${issue.id}`);
+      const raw = response.data?.stepBeanCollection || [];
+      steps = raw.map(s => ({
+        id: s.id,
+        orderId: s.orderId,
+        description: s.step,
+        testData: s.data || undefined,
+        expectedResult: s.result || undefined,
+      }));
+    } catch {
+      // A Test issue without steps (or steps not accessible) still returns the case.
+      steps = [];
+    }
+
+    return this.issueToTestCase(issue, steps);
+  }
+
+  private issueToTestCase(issue: any, steps: ZephyrTestStep[]): ZephyrTestCase {
+    const fields = issue.fields || {};
+    return {
+      id: String(issue.id),
+      key: issue.key,
+      name: fields.summary || '',
+      objective: fields.description || undefined,
+      status: fields.status?.name,
+      priority: fields.priority?.name,
+      labels: fields.labels || [],
+      components: (fields.components || []).map((c: { name: string }) => c.name),
+      project: fields.project
+        ? { key: fields.project.key, name: fields.project.name }
+        : undefined,
+      createdOn: fields.created || undefined,
+      steps,
     };
   }
 }

@@ -75,7 +75,7 @@ const TOOLS = [
   },
   {
     name: 'create_test_plan',
-    description: 'Create a new test plan in Zephyr',
+    description: '[NOT SUPPORTED] Test plans do not exist in Zephyr for JIRA (Zephyr Squad). Returns an unsupported-feature error.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,7 +90,7 @@ const TOOLS = [
   },
   {
     name: 'list_test_plans',
-    description: 'List existing test plans',
+    description: '[NOT SUPPORTED] Test plans do not exist in Zephyr for JIRA (Zephyr Squad). Returns an unsupported-feature error.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -103,7 +103,7 @@ const TOOLS = [
   },
   {
     name: 'create_test_cycle',
-    description: 'Create a new test execution cycle',
+    description: '[READ-ONLY ITERATION] Not implemented yet in this fork. Returns a read-only-iteration error.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -120,7 +120,7 @@ const TOOLS = [
   },
   {
     name: 'list_test_cycles',
-    description: 'List existing test cycles with execution status',
+    description: 'List Zephyr Squad test cycles for a project (optionally filtered by version) with execution status',
     inputSchema: {
       type: 'object',
       properties: {
@@ -133,7 +133,7 @@ const TOOLS = [
   },
   {
     name: 'execute_test',
-    description: 'Update test execution results',
+    description: '[READ-ONLY ITERATION] Not implemented yet in this fork. Returns a read-only-iteration error.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -158,7 +158,7 @@ const TOOLS = [
   },
   {
     name: 'link_tests_to_issues',
-    description: 'Associate test cases with JIRA issues',
+    description: '[READ-ONLY ITERATION] Not implemented yet in this fork. Returns a read-only-iteration error.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -182,7 +182,7 @@ const TOOLS = [
   },
   {
     name: 'create_test_case',
-    description: 'Create a new test case in Zephyr',
+    description: '[READ-ONLY ITERATION] Not implemented yet in this fork. Returns a read-only-iteration error.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -226,7 +226,7 @@ const TOOLS = [
   },
   {
     name: 'search_test_cases',
-    description: 'Search for test cases in a project',
+    description: 'Search test cases (JIRA issues of the Test type) in a project',
     inputSchema: {
       type: 'object',
       properties: {
@@ -239,18 +239,18 @@ const TOOLS = [
   },
   {
     name: 'get_test_case',
-    description: 'Get detailed information about a specific test case',
+    description: 'Get a test case (JIRA Test issue) with its Zephyr test steps',
     inputSchema: {
       type: 'object',
       properties: {
-        testCaseId: { type: 'string', description: 'Test case ID or key' },
+        testCaseId: { type: 'string', description: 'Test case issue key (e.g. QA-240) or issue id' },
       },
       required: ['testCaseId'],
     },
   },
   {
     name: 'create_multiple_test_cases',
-    description: 'Create multiple test cases in Zephyr at once',
+    description: '[READ-ONLY ITERATION] Not implemented yet in this fork. Returns a read-only-iteration error.',
     inputSchema: {
       type: 'object',
       properties: {

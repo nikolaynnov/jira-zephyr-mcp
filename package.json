@@ -5,11 +5,12 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts && echo '#!/usr/bin/env node' | cat - dist/index.js > temp && mv temp dist/index.js && chmod +x dist/index.js",
-    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check-api": "tsx scripts/check-api.ts"
   },
   "keywords": ["mcp", "jira", "zephyr", "test-management", "testing"],
   "author": "",
@@ -26,6 +27,7 @@
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "tsup": "^8.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.5.0"
   },
   "engines": {

@@ -2,6 +2,62 @@
 
 A Model Context Protocol (MCP) server that provides comprehensive integration with JIRA's Zephyr test management system. This server enables seamless test management operations including creating test plans, managing test cycles, executing tests, and reading JIRA issues.
 
+## Fork: JIRA 8.12 Server + Zephyr for JIRA 5.6.3
+
+> **This fork targets an on-prem JIRA, not JIRA Cloud / Zephyr Scale.**
+>
+> Upstream talks to JIRA Cloud (`/rest/api/3`) and Zephyr Scale Cloud
+> (`https://api.zephyrscale.smartbear.com/v2`). This fork retargets it to a
+> self-hosted **JIRA 8.12 Server / Data Center** with the
+> **Zephyr for JIRA 5.6.3 (Zephyr Squad Server / ZAPI)** add-on.
+
+### Goals
+
+- **Authentication** - support self-hosted JIRA auth in two modes: **login +
+  password** HTTP Basic (works on any version, incl. JIRA < 8.14) and
+  **Personal Access Token** Bearer (JIRA 8.14+). Switching to a PAT later is
+  just an env change.
+- **JIRA REST** - target `/rest/api/2` instead of the Cloud-only `/rest/api/3`
+  (plain-text issue descriptions instead of ADF, `assignee` by `name`).
+- **Zephyr REST** - talk to the **ZAPI** endpoints hosted on the JIRA server
+  (`/rest/zapi/latest/...`) using the same JIRA session - no separate Zephyr token.
+- **First milestone** - get all **read-only** tools working end-to-end.
+
+### Platform differences that shape the fork
+
+| Concept | Zephyr Scale (Cloud, upstream) | Zephyr Squad 5.6.3 (this fork) |
+|---------|--------------------------------|--------------------------------|
+| Base URL | `api.zephyrscale.smartbear.com/v2` | `<jira>/rest/zapi/latest` |
+| Auth | `Bearer <ZEPHYR_API_TOKEN>` | JIRA Basic (login/password) |
+| Test case | first-class entity | a JIRA issue of type `Test` (+ ZAPI test steps) |
+| Test cycle | `testcycles` | ZAPI `cycle` (needs numeric `projectId` / `versionId`) |
+| Execution status | `PASS` / `FAIL` / `WIP` / `BLOCKED` | numeric IDs (1/2/3/4, `-1` unexecuted; configurable) |
+| **Test plan** | supported | **not supported** - no such concept in Zephyr Squad |
+
+> `create_test_plan` and `list_test_plans` will be disabled in this fork with an
+> explicit "not supported in Zephyr Squad" message.
+
+### API compatibility probe
+
+Before rewriting the clients, verify every endpoint the read-only tools rely on is
+available on your server. The probe issues **GET** requests only (safe for prod):
+
+1. Copy `.env.probe.example` to `.env` and fill in your JIRA URL, login and password.
+2. Install dev dependencies once (`npm install`), then run:
+
+```bash
+npm run check-api
+```
+
+The script prints a support matrix (`[ OK ]` / `[FAIL]` / `[SKIP]`) for each endpoint
+and the read-only tool that depends on it.
+
+> **Verified:** on a JIRA 8.12 + Zephyr for JIRA 5.6.3 instance every read-only
+> endpoint above returns `200` with login/password Basic auth. Two findings feed into
+> the client rewrite: the JIRA host is reached **directly** (the probe bypasses the
+> corporate Squid proxy), and the *Test* issue type may be **localized** (e.g. `Тест`),
+> so it must be configurable rather than hard-coded.
+
 ## Features
 
 ### Core Capabilities
@@ -44,10 +100,9 @@ Clone the project, then add the following to your Cursor configuration:
       "command": "node",
       "args": ["/path/to/jira-zephyr-mcp/dist/index.js"],
       "env": {
-        "JIRA_BASE_URL": "https://your-domain.atlassian.net",
-        "JIRA_USERNAME": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-jira-api-token",
-        "ZEPHYR_API_TOKEN": "your-zephyr-api-token"
+        "JIRA_BASE_URL": "https://jira.your-company.com",
+        "JIRA_USERNAME": "your-jira-login",
+        "JIRA_PASSWORD": "your-jira-password"
       }
     }
   }
@@ -63,12 +118,11 @@ Alternatively, you can configure Cursor to run the MCP server in Docker (ensure 
   "mcpServers": {
     "jira-zephyr": {
       "command": "docker",
-      "args": ["run", "--rm", "-i","-e","JIRA_BASE_URL","-e","JIRA_USERNAME","-e","JIRA_API_TOKEN","-e","ZEPHYR_API_TOKEN", "jira-zephyr-mcp"],
+      "args": ["run", "--rm", "-i","-e","JIRA_BASE_URL","-e","JIRA_USERNAME","-e","JIRA_PASSWORD", "jira-zephyr-mcp"],
       "env": {
-        "JIRA_BASE_URL": "https://your-domain.atlassian.net",
-        "JIRA_USERNAME": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-jira-api-token",
-        "ZEPHYR_API_TOKEN": "your-zephyr-api-token"
+        "JIRA_BASE_URL": "https://jira.your-company.com",
+        "JIRA_USERNAME": "your-jira-login",
+        "JIRA_PASSWORD": "your-jira-password"
       }
     }
   }
@@ -100,26 +154,28 @@ npm run build
 cp .env.example .env
 ```
 
-2. Configure your JIRA and Zephyr credentials in `.env`:
+2. Configure your JIRA credentials in `.env`:
 ```bash
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_USERNAME=your-email@company.com
-JIRA_API_TOKEN=your-jira-api-token
-ZEPHYR_API_TOKEN=your-zephyr-api-token
+JIRA_BASE_URL=https://jira.your-company.com
+JIRA_USERNAME=your-jira-login
+JIRA_PASSWORD=your-jira-password
+# Optional: name of the "Test" issue type (auto-detected if omitted), e.g. Тест
+# JIRA_TEST_ISSUE_TYPE=Test
 ```
 
-### Getting API Tokens
+### Authentication
 
-#### JIRA API Token
-1. Go to [Atlassian Account Settings](https://id.atlassian.com/profile)
-2. Navigate to Security → API tokens
-3. Create a new API token
-4. Copy the token to your `.env` file
+This fork targets **JIRA 8.12 Server + Zephyr for JIRA 5.6.3 (Zephyr Squad)** and
+supports two authentication modes. ZAPI is served by the same JIRA instance under
+`/rest/zapi/latest`, so it reuses the JIRA session — no separate Zephyr API token
+is required.
 
-#### Zephyr API Token
-1. In JIRA, go to Apps → Zephyr Scale → API Access Tokens
-2. Generate a new token
-3. Copy the token to your `.env` file
+- **Basic auth** — set `JIRA_USERNAME` + `JIRA_PASSWORD`. Works on any JIRA
+  version, including releases older than 8.14 that predate Personal Access Tokens.
+- **Bearer (PAT)** — set `JIRA_API_TOKEN` to a Personal Access Token. Requires
+  JIRA 8.14+. When present it takes precedence over the username/password, so
+  once your server is upgraded you can drop the token in and remove the
+  login/password.
 
 ## Usage
 
@@ -162,10 +218,9 @@ You can specify a different tag if desired, e.g., `-t jira-zephyr-mcp:v1.0.0`.
 
 ```bash
 docker run -d --name jira-zephyr-mcp \
-  -e JIRA_BASE_URL=https://your-domain.atlassian.net \
-  -e JIRA_USERNAME=your-email@company.com \
-  -e JIRA_API_TOKEN=your-jira-api-token \
-  -e ZEPHYR_API_TOKEN=your-zephyr-api-token \
+  -e JIRA_BASE_URL=https://jira.your-company.com \
+  -e JIRA_USERNAME=your-jira-login \
+  -e JIRA_PASSWORD=your-jira-password \
   jira-zephyr-mcp:latest
 ```
 

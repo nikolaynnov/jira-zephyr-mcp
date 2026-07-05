@@ -1,117 +1,12 @@
-import { ZephyrClient } from '../clients/zephyr-client.js';
-import {
-  createTestPlanSchema,
-  listTestPlansSchema,
-  CreateTestPlanInput,
-  ListTestPlansInput,
-} from '../utils/validation.js';
+// Test Plans do not exist in Zephyr for JIRA 5.6.3 (Zephyr Squad Server). They
+// are a Zephyr Scale Cloud concept. These tools are kept only to return a clear
+// "not supported" message so callers get an explicit answer.
+import { notSupportedOnPlatform } from '../utils/tool-status.js';
 
-let zephyrClient: ZephyrClient | null = null;
-
-const getZephyrClient = (): ZephyrClient => {
-  if (!zephyrClient) {
-    zephyrClient = new ZephyrClient();
-  }
-  return zephyrClient;
+export const createTestPlan = async (_input: unknown) => {
+  return notSupportedOnPlatform('Test plans (create_test_plan)');
 };
 
-export const createTestPlan = async (input: CreateTestPlanInput) => {
-  const validatedInput = createTestPlanSchema.parse(input);
-  
-  try {
-    const testPlan = await getZephyrClient().createTestPlan({
-      name: validatedInput.name,
-      description: validatedInput.description,
-      projectKey: validatedInput.projectKey,
-      startDate: validatedInput.startDate,
-      endDate: validatedInput.endDate,
-    });
-    
-    return {
-      success: true,
-      data: {
-        id: testPlan.id,
-        key: testPlan.key,
-        name: testPlan.name,
-        description: testPlan.description,
-        projectId: testPlan.projectId,
-        status: testPlan.status,
-        createdOn: testPlan.createdOn,
-        createdBy: testPlan.createdBy.displayName,
-      },
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message,
-    };
-  }
-};
-
-export const listTestPlans = async (input: ListTestPlansInput) => {
-  const validatedInput = listTestPlansSchema.parse(input);
-  
-  try {
-    const result = await getZephyrClient().getTestPlans(
-      validatedInput.projectKey,
-      validatedInput.limit,
-      validatedInput.offset
-    );
-    
-    return {
-      success: true,
-      data: {
-        total: result.total,
-        testPlans: result.testPlans.map(plan => ({
-          id: plan.id,
-          key: plan.key,
-          name: plan.name,
-          description: plan.description,
-          status: plan.status,
-          createdOn: plan.createdOn,
-          updatedOn: plan.updatedOn,
-          createdBy: plan.createdBy.displayName,
-        })),
-      },
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message,
-    };
-  }
-};
-
-export const getTestPlan = async (input: { testPlanId: string }) => {
-  try {
-    const result = await getZephyrClient().getTestPlans('', 1, 0);
-    const testPlan = result.testPlans.find(plan => plan.id === input.testPlanId);
-    
-    if (!testPlan) {
-      return {
-        success: false,
-        error: 'Test plan not found',
-      };
-    }
-    
-    return {
-      success: true,
-      data: {
-        id: testPlan.id,
-        key: testPlan.key,
-        name: testPlan.name,
-        description: testPlan.description,
-        projectId: testPlan.projectId,
-        status: testPlan.status,
-        createdOn: testPlan.createdOn,
-        updatedOn: testPlan.updatedOn,
-        createdBy: testPlan.createdBy.displayName,
-      },
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message,
-    };
-  }
+export const listTestPlans = async (_input: unknown) => {
+  return notSupportedOnPlatform('Test plans (list_test_plans)');
 };

@@ -1,14 +1,11 @@
 import { ZephyrClient } from '../clients/zephyr-client.js';
 import {
-  executeTestSchema,
   getTestExecutionStatusSchema,
-  linkTestsToIssuesSchema,
   generateTestReportSchema,
-  ExecuteTestInput,
   GetTestExecutionStatusInput,
-  LinkTestsToIssuesInput,
   GenerateTestReportInput,
 } from '../utils/validation.js';
+import { readOnlyIteration } from '../utils/tool-status.js';
 
 let zephyrClient: ZephyrClient | null = null;
 
@@ -19,40 +16,8 @@ const getZephyrClient = (): ZephyrClient => {
   return zephyrClient;
 };
 
-export const executeTest = async (input: ExecuteTestInput) => {
-  const validatedInput = executeTestSchema.parse(input);
-  
-  try {
-    const execution = await getZephyrClient().updateTestExecution({
-      executionId: validatedInput.executionId,
-      status: validatedInput.status,
-      comment: validatedInput.comment,
-      defects: validatedInput.defects,
-    });
-    
-    return {
-      success: true,
-      data: {
-        id: execution.id,
-        key: execution.key,
-        cycleId: execution.cycleId,
-        testCaseId: execution.testCaseId,
-        status: execution.status,
-        comment: execution.comment,
-        executedOn: execution.executedOn,
-        executedBy: execution.executedBy?.displayName,
-        defects: execution.defects.map(defect => ({
-          key: defect.key,
-          summary: defect.summary,
-        })),
-      },
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message,
-    };
-  }
+export const executeTest = async (_input: unknown) => {
+  return readOnlyIteration('execute_test');
 };
 
 export const getTestExecutionStatus = async (input: GetTestExecutionStatusInput) => {
@@ -91,43 +56,8 @@ export const getTestExecutionStatus = async (input: GetTestExecutionStatusInput)
   }
 };
 
-export const linkTestsToIssues = async (input: LinkTestsToIssuesInput) => {
-  const validatedInput = linkTestsToIssuesSchema.parse(input);
-  
-  try {
-    const results = [];
-    
-    for (const issueKey of validatedInput.issueKeys) {
-      try {
-        await getZephyrClient().linkTestCaseToIssue(validatedInput.testCaseId, issueKey);
-        results.push({
-          issueKey,
-          success: true,
-        });
-      } catch (error: any) {
-        results.push({
-          issueKey,
-          success: false,
-          error: error.response?.data?.message || error.message,
-        });
-      }
-    }
-    
-    return {
-      success: true,
-      data: {
-        testCaseId: validatedInput.testCaseId,
-        linkResults: results,
-        successCount: results.filter(r => r.success).length,
-        failureCount: results.filter(r => !r.success).length,
-      },
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message,
-    };
-  }
+export const linkTestsToIssues = async (_input: unknown) => {
+  return readOnlyIteration('link_tests_to_issues');
 };
 
 export const generateTestReport = async (input: GenerateTestReportInput) => {
@@ -188,8 +118,8 @@ const generateHtmlReport = (report: any) => {
     <body>
       <div class="header">
         <h1>Test Execution Report</h1>
-        <h2>${report.cycleName}</h2>
-        <p>Project: ${report.projectKey}</p>
+        <h2>${report.cycleName || `Cycle ${report.cycleId}`}</h2>
+        ${report.versionName ? `<p>Version: ${report.versionName}</p>` : ''}
         <p>Generated: ${new Date(report.generatedOn).toLocaleString()}</p>
       </div>
       
@@ -219,10 +149,10 @@ const generateHtmlReport = (report: any) => {
       <div class="executions">
         <h3>Test Executions</h3>
         ${report.executions.map((exec: any) => `
-          <div class="execution ${exec.status.toLowerCase()}">
-            <strong>${exec.key}</strong> - ${exec.status}
+          <div class="execution ${String(exec.status || '').toLowerCase()}">
+            <strong>${exec.issueKey || exec.id}</strong> - ${exec.statusName || exec.status}
+            ${exec.summary ? `<p>${exec.summary}</p>` : ''}
             ${exec.comment ? `<p>${exec.comment}</p>` : ''}
-            ${exec.defects.length > 0 ? `<p>Defects: ${exec.defects.map((d: any) => d.key).join(', ')}</p>` : ''}
           </div>
         `).join('')}
       </div>
