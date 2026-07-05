@@ -1,3 +1,21 @@
+This project (nikolaynnov/jira-zephyr-mcp) is a fork of
+leorosignoli/jira-zephyr-mcp and is distributed under TWO licenses:
+
+  * SECTION 1 - the original upstream work is licensed under the MIT License.
+  * SECTION 2 - all modifications, additions, and new files introduced in this
+    fork are licensed under the NPF (No Perdak Fire) License.
+
+You must comply with both. Note that any portions originating from the upstream
+project remain available under the MIT License (Section 1) regardless of the
+terms in Section 2; the MIT rights granted by the original author cannot be
+revoked by this fork.
+
+===============================================================================
+SECTION 1 - ORIGINAL WORK
+Applies to: all code inherited from the upstream project
+            leorosignoli/jira-zephyr-mcp
+===============================================================================
+
 MIT License
 
 Copyright (c) 2025 Leonardo Andrade
@@ -11,6 +29,84 @@ furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
+SECTION 2 - MODIFICATIONS
+Applies to: all changes, additions, and new files introduced in this fork
+            (nikolaynnov/jira-zephyr-mcp)
+===============================================================================
+
+NPF (No Perdak Fire) License
+Version 1.0
+
+SPDX-License-Identifier: LicenseRef-NPF-1.0
+
+Copyright (c) 2026 Andrey Bataev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of the modifications introduced in this fork and associated documentation
+files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following
+conditions:
+
+1. Attribution.
+   The above copyright notice and this permission notice (including the
+   No Perdak Fire Condition below) shall be included in all copies or
+   substantial portions of the Software.
+
+2. No Perdak Fire Condition (the "NPF Condition").
+   Permission to exercise ANY of the rights granted above -- including but
+   not limited to using, reading, copying, modifying, merging, publishing,
+   distributing, sublicensing, selling, or transferring the Software to any
+   party anywhere -- is granted ONLY to a person whose perdak (also known as
+   pukan) does not ignite ("catch fire") frequently, with or without cause.
+
+   2.1 Definition of ignition.
+       A person's perdak is deemed to be ON FIRE if such person exhibits
+       disproportionate irritation, indignation, butthurt, or emotional
+       combustion in response to matters including, but not limited to:
+
+         (a) commits pushed without a Merge Request / Pull Request;
+         (b) commits lacking a link to the corresponding Jira (or
+             equivalent) issue;
+         (c) force-pushes to shared branches;
+         (d) any other petty grievance over which the person is prone
+             to combust.
+
+   2.2 Frequency and proportionality.
+       Occasional, proportionate, and constructive frustration does NOT
+       constitute ignition. This License targets only chronic and
+       disproportionate perdak combustion, "for a reason and for no reason
+       at all" (po povodu i bez).
+
+   2.3 Automatic revocation.
+       If a person's perdak is found to ignite frequently and
+       disproportionately as described above, all rights granted under this
+       Section 2 are immediately and automatically revoked with respect to
+       that person. Any further action with the fork's modifications by that
+       person constitutes infringement. (This does not affect the rights
+       granted under Section 1 for the original MIT-licensed work.)
+
+   2.4 Reinstatement (cooling-off).
+       Rights revoked under Section 2.3 are automatically reinstated once,
+       and for as long as, the person's perdak has verifiably cooled and
+       remains non-combustible under normal operating conditions.
+
+3. Determination.
+   Determination of any person's perdak status under this Section 2 is made at
+   the sole, final, and unappealable discretion of the copyright holder(s) of
+   the modifications. Arguing loudly about this determination is itself
+   admissible evidence of ignition.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

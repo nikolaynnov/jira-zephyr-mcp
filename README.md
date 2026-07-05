@@ -1,4 +1,5 @@
 # JIRA Zephyr MCP Server
+[![License: MIT + NPF 1.0](https://img.shields.io/badge/License-MIT%20%2B%20NPF%201.0-e25822.svg)](LICENSE)
 
 A Model Context Protocol (MCP) server that provides comprehensive integration with JIRA's Zephyr test management system. This server enables seamless test management operations including creating test plans, managing test cycles, executing tests, and reading JIRA issues.
 
@@ -310,27 +311,33 @@ The server implements comprehensive error handling:
 ### Scripts
 - `npm run build` - Build the TypeScript project
 - `npm run dev` - Run in development mode with file watching
+- `npm start` - Run the built MCP server
 - `npm run lint` - Run ESLint
 - `npm run typecheck` - Run TypeScript type checking
+- `npm run check-api` - Probe the target JIRA/ZAPI instance for read-only API compatibility
 
 ### Project Structure
 ```
 src/
 ├── index.ts              # Main MCP server entry point
 ├── clients/              # API clients
-│   ├── jira-client.ts    # JIRA REST API client
-│   └── zephyr-client.ts  # Zephyr API client
+│   ├── jira-client.ts    # JIRA REST v2 client (Server/DC)
+│   └── zephyr-client.ts  # Zephyr Squad ZAPI client (read-only)
 ├── tools/                # MCP tool implementations
 │   ├── jira-issues.ts    # JIRA issue tools
-│   ├── test-plans.ts     # Test plan management
+│   ├── test-plans.ts     # Test plans (not supported on Zephyr Squad)
 │   ├── test-cycles.ts    # Test cycle management
+│   ├── test-cases.ts     # Test case tools
 │   └── test-execution.ts # Test execution tools
 ├── types/                # TypeScript type definitions
 │   ├── jira-types.ts     # JIRA API types
-│   └── zephyr-types.ts   # Zephyr API types
+│   └── zephyr-types.ts   # Zephyr ZAPI types
 └── utils/                # Utility functions
-    ├── config.ts         # Configuration management
+    ├── config.ts         # Configuration & auth management
+    ├── tool-status.ts    # Shared not-supported / read-only responses
     └── validation.ts     # Input validation schemas
+scripts/
+└── check-api.ts          # Read-only JIRA/ZAPI compatibility probe (npm run check-api)
 ```
 
 ## Contributing
@@ -350,7 +357,16 @@ src/
 
 ## License
 
-MIT License - see LICENSE file for details
+This project is a fork of
+[leorosignoli/jira-zephyr-mcp](https://github.com/leorosignoli/jira-zephyr-mcp)
+and is distributed under **two** licenses:
+
+- **Original upstream code** — MIT License, Copyright (c) 2025 Leonardo Andrade.
+- **Modifications in this fork** — NPF (No Perdak Fire) License, Copyright (c) 2026 nikolaynnov.
+
+See the [LICENSE](LICENSE) file for the full text of both. Any portions inherited
+from the upstream project remain available under the MIT License regardless of
+the NPF terms.
 
 ## Support
 
