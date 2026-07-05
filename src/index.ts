@@ -77,6 +77,7 @@ const server = new Server(
 const TOOLS = [
   {
     name: 'read_jira_issue',
+    annotations: { readOnlyHint: true },
     description: 'Read JIRA issue details and metadata',
     inputSchema: {
       type: 'object',
@@ -134,6 +135,7 @@ const TOOLS = [
   },
   {
     name: 'list_test_cycles',
+    annotations: { readOnlyHint: true },
     description: 'List Zephyr Squad test cycles for a project (optionally filtered by version) with execution status',
     inputSchema: {
       type: 'object',
@@ -161,6 +163,7 @@ const TOOLS = [
   },
   {
     name: 'get_test_execution_status',
+    annotations: { readOnlyHint: true },
     description: 'Get aggregate execution progress and statistics for a test cycle (pass/fail/blocked counts and pass rate). For the per-test execution list use list_test_cycle_executions.',
     inputSchema: {
       type: 'object',
@@ -172,6 +175,7 @@ const TOOLS = [
   },
   {
     name: 'list_test_cycle_executions',
+    annotations: { readOnlyHint: true },
     description: 'List individual test executions inside a test cycle (each test with its status, executed date, executor and comment). Use this to see WHICH tests ran in a cycle, not just the totals.',
     inputSchema: {
       type: 'object',
@@ -197,6 +201,7 @@ const TOOLS = [
   },
   {
     name: 'generate_test_report',
+    annotations: { readOnlyHint: true },
     description: 'Generate a test execution report for a cycle. JSON format includes the full list of executions (issue key, status, executed date, version) plus a summary; HTML format renders a human-readable page.',
     inputSchema: {
       type: 'object',
@@ -253,6 +258,7 @@ const TOOLS = [
   },
   {
     name: 'search_test_cases',
+    annotations: { readOnlyHint: true },
     description: 'Search test cases (JIRA issues of the Test type) in a project using structured filters. All filters are optional and combine with AND. Note: `text` is a free-text keyword match on summary/description (NOT JQL); use `labels`/`components` for exact filtering.',
     inputSchema: {
       type: 'object',
@@ -268,6 +274,7 @@ const TOOLS = [
   },
   {
     name: 'get_test_case',
+    annotations: { readOnlyHint: true },
     description: 'Get a test case (JIRA Test issue) with its Zephyr test steps. Set includeExecutions to also return its execution history (last execution + all runs across cycles).',
     inputSchema: {
       type: 'object',
@@ -280,6 +287,7 @@ const TOOLS = [
   },
   {
     name: 'get_test_case_executions',
+    annotations: { readOnlyHint: true },
     description: 'Get the execution history of a single test case across all cycles (newest first): status, executed date, executor, cycle and version/release. Also returns the test case labels and components once at the top level. Use this to answer "when was this test last run and for which release?".',
     inputSchema: {
       type: 'object',
@@ -291,7 +299,8 @@ const TOOLS = [
   },
   {
     name: 'search_test_executions',
-    description: 'Search test EXECUTIONS (runs) server-side via ZQL (Zephyr Query Language), which queries executions rather than issues. Answers questions like "which tests with label=modules failed or were not run in release 2026.2 (Windows and Linux)" in a SINGLE call. All structured filters are optional and combine with AND; array filters match ANY of their values. Each returned execution includes any LINKED DEFECTS (defectKeys + defects[] with key/summary/status), so you can jump straight from a failed run to its bug reports without extra calls. IMPORTANT: if `zql` is provided, ALL structured filters are ignored and the raw ZQL is used as-is.',
+    annotations: { readOnlyHint: true },
+    description: 'Search test EXECUTIONS (runs) server-side via ZQL (Zephyr Query Language), which queries executions rather than issues. All structured filters are optional and combine with AND; array filters match ANY of their values. Each returned execution includes any LINKED DEFECTS (defectKeys + defects[] with key/summary/status). IMPORTANT: if `zql` is provided, ALL structured filters are ignored and the raw ZQL is used as-is.',
     inputSchema: {
       type: 'object',
       properties: {
