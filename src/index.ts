@@ -13,10 +13,17 @@ import { createTestCycle, listTestCycles } from './tools/test-cycles.js';
 import {
   executeTest,
   getTestExecutionStatus,
+  listTestCycleExecutions,
   linkTestsToIssues,
   generateTestReport,
 } from './tools/test-execution.js';
-import { createTestCase, searchTestCases, getTestCase, createMultipleTestCases } from './tools/test-cases.js';
+import {
+  createTestCase,
+  searchTestCases,
+  getTestCase,
+  getTestCaseExecutions,
+  createMultipleTestCases,
+} from './tools/test-cases.js';
 import {
   readJiraIssueSchema,
   createTestPlanSchema,
@@ -25,11 +32,13 @@ import {
   listTestCyclesSchema,
   executeTestSchema,
   getTestExecutionStatusSchema,
+  listTestCycleExecutionsSchema,
   linkTestsToIssuesSchema,
   generateTestReportSchema,
   createTestCaseSchema,
   searchTestCasesSchema,
   getTestCaseSchema,
+  getTestCaseExecutionsSchema,
   createMultipleTestCasesSchema,
   ReadJiraIssueInput,
   CreateTestPlanInput,
@@ -38,11 +47,13 @@ import {
   ListTestCyclesInput,
   ExecuteTestInput,
   GetTestExecutionStatusInput,
+  ListTestCycleExecutionsInput,
   LinkTestsToIssuesInput,
   GenerateTestReportInput,
   CreateTestCaseInput,
   SearchTestCasesInput,
   GetTestCaseInput,
+  GetTestCaseExecutionsInput,
   CreateMultipleTestCasesInput,
 } from './utils/validation.js';
 
@@ -147,11 +158,24 @@ const TOOLS = [
   },
   {
     name: 'get_test_execution_status',
-    description: 'Get test execution progress and statistics',
+    description: 'Get aggregate execution progress and statistics for a test cycle (pass/fail/blocked counts and pass rate). For the per-test execution list use list_test_cycle_executions.',
     inputSchema: {
       type: 'object',
       properties: {
         cycleId: { type: 'string', description: 'Test cycle ID' },
+      },
+      required: ['cycleId'],
+    },
+  },
+  {
+    name: 'list_test_cycle_executions',
+    description: 'List individual test executions inside a test cycle (each test with its status, executed date, executor and comment). Use this to see WHICH tests ran in a cycle, not just the totals.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cycleId: { type: 'string', description: 'Test cycle ID' },
+        projectKey: { type: 'string', description: 'JIRA project key (optional, improves lookup accuracy)' },
+        versionId: { type: 'string', description: 'JIRA version ID (optional)' },
       },
       required: ['cycleId'],
     },
@@ -170,7 +194,7 @@ const TOOLS = [
   },
   {
     name: 'generate_test_report',
-    description: 'Generate test execution report',
+    description: 'Generate a test execution report for a cycle. JSON format includes the full list of executions (issue key, status, executed date, version) plus a summary; HTML format renders a human-readable page.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -239,11 +263,23 @@ const TOOLS = [
   },
   {
     name: 'get_test_case',
-    description: 'Get a test case (JIRA Test issue) with its Zephyr test steps',
+    description: 'Get a test case (JIRA Test issue) with its Zephyr test steps. Set includeExecutions to also return its execution history (last execution + all runs across cycles).',
     inputSchema: {
       type: 'object',
       properties: {
         testCaseId: { type: 'string', description: 'Test case issue key (e.g. QA-240) or issue id' },
+        includeExecutions: { type: 'boolean', description: 'Include execution history (last run + all runs across cycles). Default: false', default: false },
+      },
+      required: ['testCaseId'],
+    },
+  },
+  {
+    name: 'get_test_case_executions',
+    description: 'Get the execution history of a single test case across all cycles (newest first): status, executed date, executor, cycle and version/release. Use this to answer "when was this test last run and for which release?".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        testCaseId: { type: 'string', description: 'Test case issue key (e.g. QA-1246) or issue id' },
       },
       required: ['testCaseId'],
     },
@@ -410,6 +446,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'list_test_cycle_executions': {
+        const validatedArgs = validateInput<ListTestCycleExecutionsInput>(listTestCycleExecutionsSchema, args, 'list_test_cycle_executions');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(await listTestCycleExecutions(validatedArgs), null, 2),
+            },
+          ],
+        };
+      }
+
       case 'link_tests_to_issues': {
         const validatedArgs = validateInput<LinkTestsToIssuesInput>(linkTestsToIssuesSchema, args, 'link_tests_to_issues');
         return {
@@ -465,6 +513,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: JSON.stringify(await getTestCase(validatedArgs), null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_test_case_executions': {
+        const validatedArgs = validateInput<GetTestCaseExecutionsInput>(getTestCaseExecutionsSchema, args, 'get_test_case_executions');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(await getTestCaseExecutions(validatedArgs), null, 2),
             },
           ],
         };

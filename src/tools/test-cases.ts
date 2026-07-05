@@ -1,9 +1,14 @@
 import { ZephyrClient } from '../clients/zephyr-client.js';
 import {
   searchTestCasesSchema,
+  getTestCaseSchema,
+  getTestCaseExecutionsSchema,
   SearchTestCasesInput,
+  GetTestCaseInput,
+  GetTestCaseExecutionsInput,
 } from '../utils/validation.js';
 import { readOnlyIteration } from '../utils/tool-status.js';
+import { ZephyrTestExecution } from '../types/zephyr-types.js';
 
 let zephyrClient: ZephyrClient | null = null;
 
@@ -13,6 +18,19 @@ const getZephyrClient = (): ZephyrClient => {
   }
   return zephyrClient;
 };
+
+// Shared shape for an execution row returned by the test-case tools.
+const toExecutionView = (execution: ZephyrTestExecution) => ({
+  id: execution.id,
+  status: execution.status,
+  statusName: execution.statusName,
+  cycleId: execution.cycleId,
+  cycleName: execution.cycleName,
+  versionName: execution.versionName,
+  executedOn: execution.executedOn,
+  executedBy: execution.executedBy,
+  comment: execution.comment,
+});
 
 export const createTestCase = async (_input: unknown) => {
   return readOnlyIteration('create_test_case');
@@ -55,9 +73,14 @@ export const searchTestCases = async (input: SearchTestCasesInput) => {
   }
 };
 
-export const getTestCase = async (input: { testCaseId: string }) => {
+export const getTestCase = async (input: GetTestCaseInput) => {
+  const validatedInput = getTestCaseSchema.parse(input);
+
   try {
-    const testCase = await getZephyrClient().getTestCase(input.testCaseId);
+    const testCase = await getZephyrClient().getTestCase(
+      validatedInput.testCaseId,
+      validatedInput.includeExecutions
+    );
 
     return {
       success: true,
@@ -74,6 +97,38 @@ export const getTestCase = async (input: { testCaseId: string }) => {
         project: testCase.project,
         createdOn: testCase.createdOn,
         steps: testCase.steps,
+        ...(validatedInput.includeExecutions
+          ? {
+              lastExecution: testCase.lastExecution
+                ? toExecutionView(testCase.lastExecution)
+                : null,
+              executions: (testCase.executions || []).map(toExecutionView),
+            }
+          : {}),
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message,
+    };
+  }
+};
+
+export const getTestCaseExecutions = async (input: GetTestCaseExecutionsInput) => {
+  const validatedInput = getTestCaseExecutionsSchema.parse(input);
+
+  try {
+    const result = await getZephyrClient().getTestCaseExecutions(validatedInput.testCaseId);
+
+    return {
+      success: true,
+      data: {
+        testCaseId: result.testCaseId,
+        issueKey: result.issueKey,
+        total: result.total,
+        lastExecution: result.lastExecution ? toExecutionView(result.lastExecution) : null,
+        executions: result.executions.map(toExecutionView),
       },
     };
   } catch (error: any) {

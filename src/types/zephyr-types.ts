@@ -59,6 +59,7 @@ export interface RawZapiExecution {
   projectId?: number | string;
   projectKey?: string;
   executedOn?: string;
+  executedOnVal?: number;
   executedBy?: string;
   executedByDisplay?: string;
   assignedTo?: string;
@@ -175,6 +176,10 @@ export interface ZephyrTestCase {
   };
   createdOn?: string;
   steps: ZephyrTestStep[];
+  // Optional execution history (populated only when explicitly requested).
+  // executions are ordered newest-first, so lastExecution mirrors executions[0].
+  lastExecution?: ZephyrTestExecution;
+  executions?: ZephyrTestExecution[];
 }
 
 export interface ZephyrTestReport {

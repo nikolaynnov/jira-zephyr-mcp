@@ -1,8 +1,10 @@
 import { ZephyrClient } from '../clients/zephyr-client.js';
 import {
   getTestExecutionStatusSchema,
+  listTestCycleExecutionsSchema,
   generateTestReportSchema,
   GetTestExecutionStatusInput,
+  ListTestCycleExecutionsInput,
   GenerateTestReportInput,
 } from '../utils/validation.js';
 import { readOnlyIteration } from '../utils/tool-status.js';
@@ -22,10 +24,10 @@ export const executeTest = async (_input: unknown) => {
 
 export const getTestExecutionStatus = async (input: GetTestExecutionStatusInput) => {
   const validatedInput = getTestExecutionStatusSchema.parse(input);
-  
+
   try {
     const summary = await getZephyrClient().getTestExecutionSummary(validatedInput.cycleId);
-    
+
     return {
       success: true,
       data: {
@@ -42,7 +44,7 @@ export const getTestExecutionStatus = async (input: GetTestExecutionStatusInput)
         progress: {
           completed: summary.passed + summary.failed + summary.blocked,
           remaining: summary.notExecuted + summary.inProgress,
-          completionPercentage: summary.total > 0 
+          completionPercentage: summary.total > 0
             ? Math.round(((summary.passed + summary.failed + summary.blocked) / summary.total) * 100)
             : 0,
         },
@@ -60,12 +62,47 @@ export const linkTestsToIssues = async (_input: unknown) => {
   return readOnlyIteration('link_tests_to_issues');
 };
 
+export const listTestCycleExecutions = async (input: ListTestCycleExecutionsInput) => {
+  const validatedInput = listTestCycleExecutionsSchema.parse(input);
+
+  try {
+    const result = await getZephyrClient().getTestCycleExecutions(
+      validatedInput.cycleId,
+      validatedInput.projectKey,
+      validatedInput.versionId
+    );
+
+    return {
+      success: true,
+      data: {
+        cycleId: result.cycleId,
+        total: result.total,
+        executions: result.executions.map(execution => ({
+          id: execution.id,
+          status: execution.status,
+          statusName: execution.statusName,
+          issueKey: execution.issueKey,
+          summary: execution.summary,
+          executedOn: execution.executedOn,
+          executedBy: execution.executedBy,
+          comment: execution.comment,
+        })),
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message,
+    };
+  }
+};
+
 export const generateTestReport = async (input: GenerateTestReportInput) => {
   const validatedInput = generateTestReportSchema.parse(input);
-  
+
   try {
     const report = await getZephyrClient().generateTestReport(validatedInput.cycleId);
-    
+
     if (validatedInput.format === 'HTML') {
       const htmlReport = generateHtmlReport(report);
       return {
@@ -77,7 +114,7 @@ export const generateTestReport = async (input: GenerateTestReportInput) => {
         },
       };
     }
-    
+
     return {
       success: true,
       data: {
@@ -122,7 +159,7 @@ const generateHtmlReport = (report: any) => {
         ${report.versionName ? `<p>Version: ${report.versionName}</p>` : ''}
         <p>Generated: ${new Date(report.generatedOn).toLocaleString()}</p>
       </div>
-      
+
       <div class="summary">
         <div class="metric">
           <h3>Total Tests</h3>
@@ -145,7 +182,7 @@ const generateHtmlReport = (report: any) => {
           <div class="value">${Math.round(report.summary.passRate)}%</div>
         </div>
       </div>
-      
+
       <div class="executions">
         <h3>Test Executions</h3>
         ${report.executions.map((exec: any) => `

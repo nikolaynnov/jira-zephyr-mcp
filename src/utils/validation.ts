@@ -46,6 +46,12 @@ export const getTestExecutionStatusSchema = z.object({
   cycleId: z.string().min(1, 'Cycle ID is required'),
 });
 
+export const listTestCycleExecutionsSchema = z.object({
+  cycleId: z.string().min(1, 'Cycle ID is required'),
+  projectKey: z.string().optional(),
+  versionId: z.string().optional(),
+});
+
 export const linkTestsToIssuesSchema = z.object({
   testCaseId: z.string().min(1, 'Test case ID is required'),
   issueKeys: z.array(z.string().min(1)).min(1, 'At least one issue key is required'),
@@ -88,6 +94,11 @@ export const searchTestCasesSchema = z.object({
 
 export const getTestCaseSchema = z.object({
   testCaseId: z.string().min(1, 'Test case ID is required'),
+  includeExecutions: z.boolean().default(false),
+});
+
+export const getTestCaseExecutionsSchema = z.object({
+  testCaseId: z.string().min(1, 'Test case ID is required'),
 });
 
 export const createMultipleTestCasesSchema = z.object({
@@ -102,9 +113,11 @@ export type ListTestPlansInput = z.infer<typeof listTestPlansSchema>;
 export type ListTestCyclesInput = z.infer<typeof listTestCyclesSchema>;
 export type ExecuteTestInput = z.infer<typeof executeTestSchema>;
 export type GetTestExecutionStatusInput = z.infer<typeof getTestExecutionStatusSchema>;
+export type ListTestCycleExecutionsInput = z.infer<typeof listTestCycleExecutionsSchema>;
 export type LinkTestsToIssuesInput = z.infer<typeof linkTestsToIssuesSchema>;
 export type GenerateTestReportInput = z.infer<typeof generateTestReportSchema>;
 export type CreateTestCaseInput = z.infer<typeof createTestCaseSchema>;
 export type SearchTestCasesInput = z.infer<typeof searchTestCasesSchema>;
 export type GetTestCaseInput = z.infer<typeof getTestCaseSchema>;
+export type GetTestCaseExecutionsInput = z.infer<typeof getTestCaseExecutionsSchema>;
 export type CreateMultipleTestCasesInput = z.infer<typeof createMultipleTestCasesSchema>;

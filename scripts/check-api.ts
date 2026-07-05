@@ -182,6 +182,9 @@ const main = async (): Promise<void> => {
 
   // 4. search_test_cases (in Zephyr Squad a test case is a JIRA issue of the "Test" type)
   let sampleTestIssueId = '';
+  // An issue id known to have executions (filled in by the cycle executions probe),
+  // preferred for the issueId probe so it exercises a non-empty response.
+  let executedIssueId = '';
   const testJql = testIssueType
     ? `project = ${PROJECT_KEY} AND issuetype = "${testIssueType}"`
     : `project = ${PROJECT_KEY}`;
@@ -262,8 +265,17 @@ const main = async (): Promise<void> => {
           const { data, status } = await http.get('/rest/zapi/latest/execution', {
             params: { cycleId: sampleCycleId, projectId, versionId: sampleVersionId },
           });
-          const n = data?.executions?.length ?? 0;
-          return { http: status, note: `${n} execution(s) (cycle ${sampleCycleId}, version ${sampleVersionId})` };
+          const execs = data?.executions ?? [];
+          const n = execs.length;
+          // Capture a real executed issue id so the issueId probe below has a
+          // non-empty case, and surface the field names for client mapping.
+          const first = execs[0];
+          if (first?.issueId) executedIssueId = String(first.issueId);
+          const fields = first ? Object.keys(first).join(',') : 'none';
+          return {
+            http: status,
+            note: `${n} exec (cycle ${sampleCycleId}); fields: ${fields}`,
+          };
         }
       );
     } else {
@@ -286,6 +298,33 @@ const main = async (): Promise<void> => {
     skip(
       'get_test_case (steps)',
       'GET /rest/zapi/latest/teststep/{issueId}',
+      'no Test issue found to probe'
+    );
+  }
+
+  // 9. get_test_case_executions -> ZAPI execution history of a single "Test" issue.
+  // Powers the new get_test_case_executions tool and get_test_case includeExecutions.
+  // Prefer an issue id that actually has executions (from the cycle probe above);
+  // fall back to the first Test issue found.
+  const executionsIssueId = executedIssueId || sampleTestIssueId;
+  if (executionsIssueId) {
+    await probe(
+      'get_test_case_executions',
+      `GET /rest/zapi/latest/execution?issueId=${executionsIssueId}`,
+      async () => {
+        const { data, status } = await http.get('/rest/zapi/latest/execution', {
+          params: { issueId: executionsIssueId },
+        });
+        const execs = data?.executions ?? [];
+        const first = execs[0];
+        const fields = first ? Object.keys(first).join(',') : 'none';
+        return { http: status, note: `${execs.length} execution(s); fields: ${fields}` };
+      }
+    );
+  } else {
+    skip(
+      'get_test_case_executions',
+      'GET /rest/zapi/latest/execution?issueId=...',
       'no Test issue found to probe'
     );
   }

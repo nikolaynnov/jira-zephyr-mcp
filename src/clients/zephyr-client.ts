@@ -158,6 +158,43 @@ export class ZephyrClient {
     };
   }
 
+  // ZAPI returns every execution of a single Test issue across all cycles when
+  // queried by issueId (verified: same envelope as the cycleId query).
+  private async fetchExecutionsByIssue(
+    issueId: string
+  ): Promise<{ executions: RawZapiExecution[]; statusMap: Record<string, RawZapiStatus> }> {
+    const response = await this.zapi.get<RawZapiExecutionResponse>('/execution', {
+      params: { issueId },
+    });
+    return {
+      executions: response.data?.executions || [],
+      statusMap: response.data?.status || {},
+    };
+  }
+
+  // Newest-first by execution timestamp; unexecuted rows (no executedOnVal) last.
+  private sortNewestFirst(executions: RawZapiExecution[]): RawZapiExecution[] {
+    return [...executions].sort(
+      (a, b) => (Number(b.executedOnVal) || 0) - (Number(a.executedOnVal) || 0)
+    );
+  }
+
+  // Per-cycle execution list (the detail behind the aggregate summary).
+  async getTestCycleExecutions(
+    cycleId: string,
+    projectKey?: string,
+    versionId?: string
+  ): Promise<{ cycleId: string; total: number; executions: ZephyrTestExecution[] }> {
+    const projectId = projectKey ? await this.jira.resolveProjectId(projectKey) : undefined;
+    const { executions, statusMap } = await this.fetchExecutions(cycleId, projectId, versionId);
+    const sorted = this.sortNewestFirst(executions);
+    return {
+      cycleId: String(cycleId),
+      total: sorted.length,
+      executions: sorted.map(e => this.normalizeExecution(e, statusMap)),
+    };
+  }
+
   async getTestExecutionSummary(
     cycleId: string,
     projectId?: string,
@@ -263,7 +300,7 @@ export class ZephyrClient {
     return { testCases, total };
   }
 
-  async getTestCase(testCaseId: string): Promise<ZephyrTestCase> {
+  async getTestCase(testCaseId: string, includeExecutions = false): Promise<ZephyrTestCase> {
     const issue = await this.jira.getIssue(testCaseId, [
       'summary',
       'description',
@@ -292,7 +329,43 @@ export class ZephyrClient {
       steps = [];
     }
 
-    return this.issueToTestCase(issue, steps);
+    const testCase = this.issueToTestCase(issue, steps);
+
+    if (includeExecutions) {
+      const executions = await this.getExecutionsForIssueId(String(issue.id));
+      testCase.executions = executions;
+      testCase.lastExecution = executions[0];
+    }
+
+    return testCase;
+  }
+
+  // Execution history of a single Test issue across all cycles (newest-first).
+  // Accepts an issue key (e.g. QA-1246) or a numeric issue id.
+  async getTestCaseExecutions(testCaseId: string): Promise<{
+    testCaseId: string;
+    issueKey?: string;
+    issueId: string;
+    total: number;
+    lastExecution?: ZephyrTestExecution;
+    executions: ZephyrTestExecution[];
+  }> {
+    const issue = await this.jira.getIssue(testCaseId, ['summary']);
+    const issueId = String(issue.id);
+    const executions = await this.getExecutionsForIssueId(issueId);
+    return {
+      testCaseId,
+      issueKey: issue.key,
+      issueId,
+      total: executions.length,
+      lastExecution: executions[0],
+      executions,
+    };
+  }
+
+  private async getExecutionsForIssueId(issueId: string): Promise<ZephyrTestExecution[]> {
+    const { executions, statusMap } = await this.fetchExecutionsByIssue(issueId);
+    return this.sortNewestFirst(executions).map(e => this.normalizeExecution(e, statusMap));
   }
 
   private issueToTestCase(issue: any, steps: ZephyrTestStep[]): ZephyrTestCase {

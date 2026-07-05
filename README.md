@@ -72,22 +72,26 @@ and the read-only tool that depends on it.
 
 ### Available Tools
 
+**Read-only (implemented for this fork):**
+
 1. **read_jira_issue** - Retrieve JIRA issue information
-2. **create_test_plan** - Create new test plans in Zephyr
-3. **list_test_plans** - Browse existing test plans
-4. **create_test_cycle** - Create test execution cycles
-5. **list_test_cycles** - View test cycles with execution status
-6. **execute_test** - Update test execution results
-7. **get_test_execution_status** - Check test execution progress
-8. **link_tests_to_issues** - Associate tests with JIRA issues
-9. **generate_test_report** - Create test execution reports
+2. **list_test_cycles** - View test cycles for a project with aggregate execution status
+3. **get_test_execution_status** - Aggregate pass/fail/blocked counts and pass rate for a cycle
+4. **list_test_cycle_executions** - List the individual test executions inside a cycle (which tests ran, with status/date/executor)
+5. **generate_test_report** - Test execution report for a cycle (JSON includes the full executions list; HTML renders a page)
+6. **search_test_cases** - Search test cases (JIRA issues of the Test type) in a project
+7. **get_test_case** - Get a test case with its Zephyr steps; optional `includeExecutions` adds its run history
+8. **get_test_case_executions** - Execution history of a single test across all cycles, newest first (status, date, executor, cycle, version/release)
+
+**Not implemented in the current read-only iteration** (return an explanatory error): `create_test_cycle`, `execute_test`, `link_tests_to_issues`, `create_test_case`, `create_multiple_test_cases`.
+
+**Not supported on Zephyr Squad** (the platform has no Test Plan concept): `create_test_plan`, `list_test_plans`.
 
 ## Prerequisites
 
 - Node.js 18.0.0 or higher
-- JIRA instance with Zephyr Scale or Zephyr Squad
-- Valid JIRA API credentials
-- Zephyr API access token
+- JIRA Server/Data Center 8.12+ with the Zephyr for JIRA (Zephyr Squad) add-on
+- Valid JIRA credentials (login + password, or a Personal Access Token on JIRA 8.14+)
 
 
 ### Integration with Cursor
