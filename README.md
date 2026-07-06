@@ -23,6 +23,9 @@ A Model Context Protocol (MCP) server that provides comprehensive integration wi
 - **Zephyr REST** - talk to the **ZAPI** endpoints hosted on the JIRA server
   (`/rest/zapi/latest/...`) using the same JIRA session - no separate Zephyr token.
 - **First milestone** - get all **read-only** tools working end-to-end.
+- **First write tool** - `link_defect_to_execution` attaches JIRA defects to a
+  Zephyr execution (and, optionally, to specific step results) via the ZAPI
+  endpoints (`/rest/zapi/latest/...`) on the same JIRA session.
 
 ### Platform differences that shape the fork
 
@@ -79,7 +82,11 @@ and the read-only tool that depends on it.
 8. **get_test_case_executions** - Execution history of a single test across all cycles, newest first (status, date, executor, cycle, version/release); also returns the test's labels and components at the top level
 9. **search_test_executions** - Search test executions (runs) server-side via ZQL. Answers "which tests with label X failed or were not run in release Y (Windows and Linux)" in a single call. Structured filters (`labels`, `components`, `status`, `fixVersions`, `cycleNameContains`, `cycleNames`) combine with AND and match any of their values; a raw `zql` escape hatch is available and, when set, takes priority and ignores the structured filters. Each returned execution also lists any linked defects (`defectKeys` plus `defects[]` with `key`, `summary`, `status`, and a ready-to-open `url`)
 
-**Not implemented in the current read-only iteration** (return an explanatory error): `create_test_cycle`, `execute_test`, `link_tests_to_issues`, `create_test_case`, `create_multiple_test_cases`.
+**Write (implemented for this fork):**
+
+10. **link_defect_to_execution** - Attach one or more JIRA defect issues to a test execution's **Defects** field (the same action as the Zephyr UI, which also auto-creates the native bidirectional JIRA link). Identify the execution by `executionId`, or by `testKey` + `cycleName` (the tool resolves the execution and its `issueId`). Existing defects are preserved and merged by default; set `replace: true` to overwrite. Optionally pass `stepResultIds` to also attach the same defects at the step level. Use `dryRun: true` to preview the resulting defect list per target without writing.
+
+**Not implemented in the current read-only iteration** (return an explanatory error): `create_test_cycle`, `execute_test`, `create_test_case`, `create_multiple_test_cases`.
 
 ## Prerequisites
 
@@ -309,7 +316,7 @@ src/
 ├── index.ts              # Main MCP server entry point
 ├── clients/              # API clients
 │   ├── jira-client.ts    # JIRA REST v2 client (Server/DC)
-│   └── zephyr-client.ts  # Zephyr Squad ZAPI client (read-only)
+│   └── zephyr-client.ts  # Zephyr Squad ZAPI client
 ├── tools/                # MCP tool implementations
 │   ├── jira-issues.ts    # JIRA issue tools
 │   ├── test-cycles.ts    # Test cycle management

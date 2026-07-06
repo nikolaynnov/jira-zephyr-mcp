@@ -4,12 +4,15 @@ import {
   listTestCycleExecutionsSchema,
   searchTestExecutionsSchema,
   generateTestReportSchema,
+  linkDefectToExecutionSchema,
   GetTestExecutionStatusInput,
   ListTestCycleExecutionsInput,
   SearchTestExecutionsInput,
   GenerateTestReportInput,
+  LinkDefectToExecutionInput,
 } from '../utils/validation.js';
 import { readOnlyIteration } from '../utils/tool-status.js';
+import { DefectLinkTargetResult } from '../types/zephyr-types.js';
 
 let zephyrClient: ZephyrClient | null = null;
 
@@ -60,8 +63,60 @@ export const getTestExecutionStatus = async (input: GetTestExecutionStatusInput)
   }
 };
 
-export const linkTestsToIssues = async (_input: unknown) => {
-  return readOnlyIteration('link_tests_to_issues');
+export const linkDefectToExecution = async (input: LinkDefectToExecutionInput) => {
+  const validatedInput = linkDefectToExecutionSchema.parse(input);
+  const client = getZephyrClient();
+
+  try {
+    const resolved = await client.resolveExecutionForDefects({
+      executionId: validatedInput.executionId,
+      testKey: validatedInput.testKey,
+      cycleName: validatedInput.cycleName,
+    });
+
+    const writeOptions = {
+      replace: validatedInput.replace,
+      dryRun: validatedInput.dryRun,
+    };
+
+    const targets: DefectLinkTargetResult[] = [];
+    targets.push(
+      await client.linkDefectsToExecution(resolved, validatedInput.defectKeys, writeOptions)
+    );
+
+    for (const stepResultId of validatedInput.stepResultIds ?? []) {
+      targets.push(
+        await client.linkDefectsToStepResult(stepResultId, validatedInput.defectKeys, writeOptions)
+      );
+    }
+
+    const failed = targets.filter(t => t.error);
+    return {
+      success: failed.length === 0,
+      data: {
+        dryRun: validatedInput.dryRun,
+        replace: validatedInput.replace,
+        execution: {
+          executionId: resolved.executionId,
+          issueId: resolved.issueId,
+          issueKey: resolved.issueKey,
+          cycleName: resolved.cycleName,
+        },
+        requestedDefects: validatedInput.defectKeys,
+        targets,
+      },
+      ...(failed.length > 0 && {
+        error: failed
+          .map(t => `${t.target} ${t.id}: ${t.error}`)
+          .join('; '),
+      }),
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message,
+    };
+  }
 };
 
 export const listTestCycleExecutions = async (input: ListTestCycleExecutionsInput) => {

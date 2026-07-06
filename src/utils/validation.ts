@@ -38,10 +38,27 @@ export const listTestCycleExecutionsSchema = z.object({
   versionId: z.string().optional(),
 });
 
-export const linkTestsToIssuesSchema = z.object({
-  testCaseId: z.string().min(1, 'Test case ID is required'),
-  issueKeys: z.array(z.string().min(1)).min(1, 'At least one issue key is required'),
-});
+export const linkDefectToExecutionSchema = z
+  .object({
+    // Target execution: either directly by id, or by (testKey + cycleName).
+    executionId: z.string().min(1).optional(),
+    testKey: z.string().min(1).optional(),
+    cycleName: z.string().min(1).optional(),
+    // JIRA defect issue keys to attach (e.g. ["IPLUS-42214"]).
+    defectKeys: z.array(z.string().min(1)).min(1, 'At least one defect key is required'),
+    // Optional step results to also attach the defects to (by stepResultId).
+    stepResultIds: z.array(z.string().min(1)).optional(),
+    // Merge (default) keeps existing defects; replace overwrites the list.
+    replace: z.boolean().default(false),
+    // Preview the payload(s) without writing.
+    dryRun: z.boolean().default(false),
+  })
+  .refine(
+    data => Boolean(data.executionId) || Boolean(data.testKey && data.cycleName),
+    {
+      message: 'Provide executionId, or both testKey and cycleName, to identify the execution.',
+    }
+  );
 
 export const generateTestReportSchema = z.object({
   cycleId: z.string().min(1, 'Cycle ID is required'),
@@ -120,7 +137,7 @@ export type ListTestCyclesInput = z.infer<typeof listTestCyclesSchema>;
 export type ExecuteTestInput = z.infer<typeof executeTestSchema>;
 export type GetTestExecutionStatusInput = z.infer<typeof getTestExecutionStatusSchema>;
 export type ListTestCycleExecutionsInput = z.infer<typeof listTestCycleExecutionsSchema>;
-export type LinkTestsToIssuesInput = z.infer<typeof linkTestsToIssuesSchema>;
+export type LinkDefectToExecutionInput = z.infer<typeof linkDefectToExecutionSchema>;
 export type GenerateTestReportInput = z.infer<typeof generateTestReportSchema>;
 export type CreateTestCaseInput = z.infer<typeof createTestCaseSchema>;
 export type SearchTestCasesInput = z.infer<typeof searchTestCasesSchema>;

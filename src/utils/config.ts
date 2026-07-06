@@ -111,7 +111,7 @@ export const getHttpClientOptions = () => {
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      'User-Agent': userAgent,
+      //'User-Agent': userAgent, // если указать User-Agent, то на Write операциях будет 403 ошибка
       ...(auth.type === 'bearer' ? { Authorization: `Bearer ${auth.token}` } : {}),
     },
     timeout: 30000,

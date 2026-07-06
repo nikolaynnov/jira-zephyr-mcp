@@ -10,7 +10,13 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
-    "check-api": "tsx scripts/check-api.ts"
+    "check-api": "tsx scripts/check-api.ts",
+    "check-link-defect": "tsx scripts/check-link-defect.ts",
+    "link-defect-write": "tsx scripts/link-defect-write.ts",
+    "diag-write": "tsx scripts/diag-write.ts",
+    "diag-cookie": "tsx scripts/diag-cookie.ts",
+    "diag-xsrf": "tsx scripts/diag-xsrf.ts",
+    "diag-ao": "tsx scripts/diag-ao.ts"
   },
   "keywords": ["mcp", "jira", "zephyr", "test-management", "testing"],
   "author": "",

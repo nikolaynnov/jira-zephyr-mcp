@@ -14,7 +14,7 @@ import {
   getTestExecutionStatus,
   listTestCycleExecutions,
   searchTestExecutions,
-  linkTestsToIssues,
+  linkDefectToExecution,
   generateTestReport,
 } from './tools/test-execution.js';
 import {
@@ -32,7 +32,7 @@ import {
   getTestExecutionStatusSchema,
   listTestCycleExecutionsSchema,
   searchTestExecutionsSchema,
-  linkTestsToIssuesSchema,
+  linkDefectToExecutionSchema,
   generateTestReportSchema,
   createTestCaseSchema,
   searchTestCasesSchema,
@@ -46,7 +46,7 @@ import {
   GetTestExecutionStatusInput,
   ListTestCycleExecutionsInput,
   SearchTestExecutionsInput,
-  LinkTestsToIssuesInput,
+  LinkDefectToExecutionInput,
   GenerateTestReportInput,
   CreateTestCaseInput,
   SearchTestCasesInput,
@@ -155,15 +155,23 @@ const TOOLS = [
     },
   },
   {
-    name: 'link_tests_to_issues',
-    description: '[READ-ONLY ITERATION] Not implemented yet in this fork. Returns a read-only-iteration error.',
+    name: 'link_defect_to_execution',
+    description:
+      'Attach one or more JIRA defect issues to a Zephyr test EXECUTION (the "Defects" field). ' +
+      'Identify the execution either by executionId, or by testKey + cycleName (the tool resolves the execution ' +
+      'and its issueId). Optionally pass stepResultIds to also attach the same defects at the step level.',
     inputSchema: {
       type: 'object',
       properties: {
-        testCaseId: { type: 'string', description: 'Test case ID' },
-        issueKeys: { type: 'array', items: { type: 'string' }, description: 'JIRA issue keys to link' },
+        executionId: { type: 'string', description: 'Zephyr execution ID to attach defects to. Provide this, or testKey + cycleName.' },
+        testKey: { type: 'string', description: 'Test issue key (e.g. "PROJ-123"). Used with cycleName to resolve the execution.' },
+        cycleName: { type: 'string', description: 'Exact test cycle name containing the execution. Used with testKey.' },
+        defectKeys: { type: 'array', items: { type: 'string' }, description: 'JIRA defect issue keys to attach (e.g. ["RM-851"]).' },
+        stepResultIds: { type: 'array', items: { type: 'string' }, description: 'Optional stepResult IDs to also attach the defects to at step level.' },
+        replace: { type: 'boolean', description: 'Overwrite the existing defect list instead of merging (default: false).' },
+        dryRun: { type: 'boolean', description: 'Preview the resulting defect list per target without writing (default: false).' },
       },
-      required: ['testCaseId', 'issueKeys'],
+      required: ['defectKeys'],
     },
   },
   {
@@ -446,13 +454,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'link_tests_to_issues': {
-        const validatedArgs = validateInput<LinkTestsToIssuesInput>(linkTestsToIssuesSchema, args, 'link_tests_to_issues');
+      case 'link_defect_to_execution': {
+        const validatedArgs = validateInput<LinkDefectToExecutionInput>(linkDefectToExecutionSchema, args, 'link_defect_to_execution');
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(await linkTestsToIssues(validatedArgs), null, 2),
+              text: JSON.stringify(await linkDefectToExecution(validatedArgs), null, 2),
             },
           ],
         };
@@ -542,18 +550,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   try {
     console.error('Starting Jira Zephyr MCP server...');
-    
+
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    
+
     console.error('Jira Zephyr MCP server running...');
-    
+
     // Handle graceful shutdown
     process.on('SIGINT', () => {
       console.error('Received SIGINT, shutting down gracefully...');
       process.exit(0);
     });
-    
+
     process.on('SIGTERM', () => {
       console.error('Received SIGTERM, shutting down gracefully...');
       process.exit(0);

@@ -460,20 +460,20 @@ const main = async (): Promise<void> => {
     return { http: status, note: `${execs.length} execution(s) of ${PROBE_LINKED_TEST_KEY}; ${hit ? `defect on execId=${hit.id}` : 'defect not inline'}` };
   });
 
-  // 9d-3. Discover the ZAPI defect/link-write surface without calling it.
-  //       NOTE: GET-probing turned out UNRELIABLE here — ZAPI returns 404 (not
-  //       405) for unknown method+path, so a GET on a POST-only route can't be
-  //       distinguished from a missing route. Kept as documentation of what was
-  //       tried. Follow-up leads to verify (from ZAPI 5.x, user-provided):
-  //         (a) POST /rest/zapi/latest/test/addIssueLink?parentIssueId=&testcaseId=
-  //             — likely what the ORIGINAL pre-fork code meant (test-case ->
-  //             issue coverage link; matches old Scale POST /testcases/{id}/links).
-  //         (b) POST/GET /rest/zapi/latest/teststep/issueId/{id} — step-level
-  //             defects; needs testStep tooling we don't have yet.
-  //       User will confirm tomorrow how links are set manually in the UI before
-  //       we pick the endpoint. NO write is performed here.
-  await probe('ZAPI defect/link-write surface (unreliable: 404!=405)', 'GET candidate endpoints', async () => {
-    // Resolve a real executionId that already carries the sample defect.
+  // 9d-3. link_tests_to_issues WRITE surface — CONFIRMED endpoints (user traced
+  //        the JIRA UI network calls). All writes live under /rest/zephyr/latest/
+  //        (NOT /rest/zapi/latest/, which is why earlier GET-probing 404'd).
+  //        Three link kinds exist:
+  //          (1) native JIRA link (bidirectional) — POST /rest/api/2/issueLink.
+  //          (2) EXECUTION defect — PUT /rest/zephyr/latest/execution/{execId}/execute
+  //              body {"defectList":[key],"issueId":<testIssueId>,"comment":"",
+  //              "updateDefectList":"true","changeAssignee":false}. This ALSO
+  //              auto-creates link (1). This is the primary action testers want.
+  //          (3) STEP defect — PUT /rest/zephyr/latest/stepResult/{stepResultId}
+  //              body {"updateDefectList":"true","defectList":[key]}.
+  //        These probes are READ-ONLY: they only confirm the /rest/zephyr base
+  //        resolves and discover how to map "step N" -> stepResultId. NO PUT.
+  await probe('zephyr write-base (read-only reachability)', 'GET /rest/zephyr/latest/execution/{id}', async () => {
     const issueRes = await http.get(`/rest/api/2/issue/${PROBE_LINKED_TEST_KEY}`, { params: { fields: 'summary' } });
     const linkedTestId = issueRes.data?.id;
     let execId = '';
@@ -483,20 +483,78 @@ const main = async (): Promise<void> => {
       const hit = execs.find((e: any) => JSON.stringify(e).includes(PROBE_DEFECT_KEY)) || execs[0];
       execId = hit ? String(hit.id) : '';
     }
-    const candidates = [
-      `/rest/zapi/latest/execution/${execId || '0'}/defect`,
-      `/rest/zapi/latest/execution/${execId || '0'}`,
-      // user-provided leads (POST routes; GET here only to see if path resolves):
-      '/rest/zapi/latest/test/addIssueLink',
-      linkedTestId ? `/rest/zapi/latest/teststep/issueId/${linkedTestId}` : '/rest/zapi/latest/teststep/issueId/0',
-    ];
-    console.log('\n--- ZAPI defect/link-write candidate endpoints (GET only; 404 is inconclusive) ---');
-    for (const path of candidates) {
-      const r = await http.get(path, { validateStatus: () => true });
-      console.log(`  ${r.status}  GET ${path}`);
+    if (!execId) return { http: 0, note: 'no execId resolved' };
+    // GET the execution under the zephyr base to confirm the base resolves and
+    // to see the read shape of defectList (safe; the write is PUT .../execute).
+    const r = await http.get(`/rest/zephyr/latest/execution/${execId}`, { validateStatus: () => true });
+    const keys = r.data && typeof r.data === 'object' ? Object.keys(r.data).slice(0, 12).join(',') : typeof r.data;
+    return { http: r.status, note: `execId=${execId}; keys: ${keys}` };
+  });
+
+  // 9d-3b. Read shape of GET /rest/zapi/latest/execution/{execId} — this route
+  //        returned 200 earlier and is the source for BOTH addressing modes:
+  //        it must expose the test issueId (needed in the /execute PUT body) and
+  //        the current defect keys (needed to MERGE instead of overwrite). READ-ONLY.
+  await probe('execution-by-id (issueId + defects for merge)', 'GET /rest/zapi/latest/execution/{execId}', async () => {
+    const issueRes = await http.get(`/rest/api/2/issue/${PROBE_LINKED_TEST_KEY}`, { params: { fields: 'summary' } });
+    const linkedTestId = issueRes.data?.id;
+    let execId = '';
+    if (linkedTestId) {
+      const execRes = await http.get('/rest/zapi/latest/execution', { params: { issueId: linkedTestId } });
+      const execs: any[] = execRes.data?.executions ?? [];
+      const hit = execs.find((e: any) => JSON.stringify(e).includes(PROBE_DEFECT_KEY)) || execs[0];
+      execId = hit ? String(hit.id) : '';
     }
-    console.log('--- end candidate endpoints ---\n');
-    return { http: 200, note: `probed ${candidates.length} candidates for execId=${execId || 'n/a'} (GET status is not conclusive for POST routes)` };
+    if (!execId) return { http: 0, note: 'no execId resolved' };
+    const r = await http.get(`/rest/zapi/latest/execution/${execId}`, { validateStatus: () => true });
+    // ZAPI often wraps single execution as { execution: {...} }; handle both.
+    const exec = r.data?.execution ?? r.data ?? {};
+    const issueId = exec.issueId ?? exec.issueid ?? '(missing)';
+    const defectFields = Object.keys(exec).filter(k => /defect/i.test(k));
+    const defects = exec.defects ?? exec.defectList ?? exec.executionDefects ?? [];
+    const defectKeys = Array.isArray(defects)
+      ? defects.map((d: any) => (typeof d === 'string' ? d : d?.key ?? d?.defectKey)).filter(Boolean)
+      : [];
+    console.log('\n--- execution-by-id shape ---');
+    console.log(`  issueId=${issueId}; defect fields: ${defectFields.join(',') || 'none'}; current defects: ${defectKeys.join(',') || 'none'}`);
+    console.log('--- end execution-by-id shape ---\n');
+    return { http: r.status, note: `issueId=${issueId}; defects=[${defectKeys.join(',')}]` };
+  });
+
+  // 9d-4. Map "step N" -> stepResultId for a real execution. The step-defect
+  //       write (#3) needs a stepResultId, but testers speak in step order
+  //       ("step 2"). Find the endpoint that lists a run's step results and
+  //       confirm it carries an id + order we can index by. READ-ONLY.
+  await probe('stepResult list (step -> stepResultId)', 'GET /rest/zephyr/latest/stepResult?executionId=', async () => {
+    const issueRes = await http.get(`/rest/api/2/issue/${PROBE_LINKED_TEST_KEY}`, { params: { fields: 'summary' } });
+    const linkedTestId = issueRes.data?.id;
+    let execId = '';
+    if (linkedTestId) {
+      const execRes = await http.get('/rest/zapi/latest/execution', { params: { issueId: linkedTestId } });
+      const execs: any[] = execRes.data?.executions ?? [];
+      const hit = execs.find((e: any) => JSON.stringify(e).includes(PROBE_DEFECT_KEY)) || execs[0];
+      execId = hit ? String(hit.id) : '';
+    }
+    if (!execId) return { http: 0, note: 'no execId resolved' };
+    const candidates = [
+      { base: '/rest/zephyr/latest/stepResult', params: { executionId: execId } },
+      { base: '/rest/zapi/latest/stepResult', params: { executionId: execId } },
+    ];
+    console.log('\n--- stepResult list candidates (GET) ---');
+    let best: any = null;
+    for (const c of candidates) {
+      const r = await http.get(c.base, { params: c.params, validateStatus: () => true });
+      const arr = Array.isArray(r.data) ? r.data : (r.data?.stepResults ?? r.data?.results ?? []);
+      const n = Array.isArray(arr) ? arr.length : 0;
+      const fields = n ? Object.keys(arr[0]).slice(0, 12).join(',') : 'none';
+      console.log(`  ${r.status}  GET ${c.base}?executionId=${execId}  -> ${n} row(s); fields: ${fields}`);
+      if (n && !best) best = { base: c.base, first: arr[0] };
+    }
+    if (best) {
+      console.log(`  step[0] id=${best.first.id ?? best.first.stepResultId}, order=${best.first.orderId ?? best.first.stepId ?? '?'}`);
+    }
+    console.log('--- end stepResult candidates ---\n');
+    return { http: 200, note: best ? `stepResults via ${best.base}` : 'no stepResult list endpoint found' };
   });
 
   // 10. ZQL execution search — the potential one-call answer to

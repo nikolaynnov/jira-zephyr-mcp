@@ -75,6 +75,7 @@ export interface RawZapiExecution {
   executedByDisplay?: string;
   assignedTo?: string;
   assignedToDisplay?: string;
+  stepDefectCount?: number;
 }
 
 export interface RawZapiStatus {
@@ -217,6 +218,7 @@ export interface ZephyrTestExecution {
   cycleId?: string;
   cycleName?: string;
   versionName?: string;
+  stepDefectCount?: string;
 }
 
 // A single row returned by the ZQL execution search (search_test_executions).
@@ -298,3 +300,50 @@ export interface ZephyrTestReport {
   executions: ZephyrTestExecution[];
   generatedOn: string;
 }
+
+// ---- defect linking (write) --------------------------------------------
+
+// GET /rest/zapi/latest/execution/{execId} returns a single execution, either
+// bare or wrapped as { execution: {...} }. Only the fields needed to build the
+// /execute PUT body and to merge the current defect list are modeled here.
+export interface RawZapiExecutionDefect {
+  key?: string;
+  defectKey?: string;
+}
+
+export interface RawZapiSingleExecution {
+  id?: number | string;
+  issueId?: number | string;
+  issueKey?: string;
+  cycleId?: number | string;
+  cycleName?: string;
+  defects?: Array<RawZapiExecutionDefect | string>;
+  defectList?: string[];
+}
+
+export interface RawZapiSingleExecutionResponse {
+  execution?: RawZapiSingleExecution;
+}
+
+// Resolved execution context needed to attach defects: the execution id, the
+// Test issue id (required in the /execute body), and the current defect keys
+// (used to merge instead of overwrite).
+export interface ResolvedExecutionForDefects {
+  executionId: string;
+  issueId: string;
+  issueKey?: string;
+  cycleName?: string;
+  currentDefects: string[];
+}
+
+// Outcome of attaching defects to one target (an execution or a step result).
+export interface DefectLinkTargetResult {
+  target: 'execution' | 'stepResult';
+  id: string;
+  before: string[];
+  after: string[];
+  added: string[];
+  written: boolean;
+  error?: string;
+}
+

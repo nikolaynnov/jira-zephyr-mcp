@@ -5,6 +5,8 @@ import {
   RawZapiCycle,
   RawZapiExecution,
   RawZapiExecutionResponse,
+  RawZapiSingleExecution,
+  RawZapiSingleExecutionResponse,
   RawZapiStatus,
   RawZapiTestStepResponse,
   RawZapiVersionBoard,
@@ -13,6 +15,8 @@ import {
   RawZqlDefect,
   ZAPI_EXECUTION_STATUS,
   ZAPI_STATUS_NAME_TO_ID,
+  DefectLinkTargetResult,
+  ResolvedExecutionForDefects,
   ZephyrExecutionSearchResult,
   ZephyrExecutionSearchRow,
   ZephyrExecutionSummary,
@@ -24,7 +28,7 @@ import {
   ZephyrTestStep,
 } from '../types/zephyr-types.js';
 
-// Read-only client for Zephyr for JIRA 5.6.3 (Zephyr Squad Server) via ZAPI.
+// Client for Zephyr for JIRA 5.6.3 (Zephyr Squad Server) via ZAPI.
 // ZAPI is hosted on the same JIRA instance under /rest/zapi/latest and shares
 // the JIRA session, so it reuses the JIRA auth/HTTP options and a JiraClient for
 // project / issue / issue-type resolution.
@@ -376,6 +380,7 @@ export class ZephyrClient {
       cycleId: raw.cycleId !== undefined ? String(raw.cycleId) : undefined,
       cycleName: raw.cycleName,
       versionName: raw.versionName,
+      stepDefectCount: raw.stepDefectCount || undefined,
     };
   }
 
@@ -524,6 +529,151 @@ export class ZephyrClient {
       lastExecution: executions[0],
       executions,
     };
+  }
+
+  // ---- defect linking (write) --------------------------------------------
+
+  // Resolve the execution to attach defects to, either directly by executionId
+  // or by (testKey + cycleName). Returns the execution id, the Test issue id
+  // (required in the /execute PUT body) and the current defect keys (for merge).
+  async resolveExecutionForDefects(input: {
+    executionId?: string;
+    testKey?: string;
+    cycleName?: string;
+  }): Promise<ResolvedExecutionForDefects> {
+    if (input.executionId && input.executionId.trim()) {
+      return this.readExecutionById(input.executionId.trim());
+    }
+    if (!input.testKey || !input.cycleName) {
+      throw new Error('Provide executionId, or both testKey and cycleName.');
+    }
+    const issue = await this.jira.getIssue(input.testKey, ['summary']);
+    const issueId = String(issue.id);
+    const { executions } = await this.fetchExecutionsByIssue(issueId);
+    const wanted = input.cycleName.trim().toLowerCase();
+    const matches = executions.filter(
+      e => (e.cycleName || '').trim().toLowerCase() === wanted
+    );
+    if (matches.length === 0) {
+      const available = [...new Set(executions.map(e => e.cycleName).filter(Boolean))];
+      throw new Error(
+        `No execution of ${input.testKey} in cycle "${input.cycleName}". ` +
+        `Available cycles: ${available.join(' | ') || '(none)'}`
+      );
+    }
+    if (matches.length > 1) {
+      const ids = matches.map(e => e.id).join(', ');
+      throw new Error(
+        `${matches.length} executions of ${input.testKey} match cycle "${input.cycleName}" ` +
+        `(executionIds: ${ids}). Pass executionId to disambiguate.`
+      );
+    }
+    return this.readExecutionById(String(matches[0].id));
+  }
+
+  // GET a single execution and extract issueId + current defect keys. Handles
+  // both the bare and { execution: {...} } response envelopes.
+  private async readExecutionById(executionId: string): Promise<ResolvedExecutionForDefects> {
+    const response = await this.zapi.get<RawZapiSingleExecution & RawZapiSingleExecutionResponse>(
+      `/execution/${executionId}`
+    );
+    const exec = response.data?.execution ?? response.data ?? {};
+    const issueId = exec.issueId !== undefined ? String(exec.issueId) : '';
+    if (!issueId) {
+      throw new Error(`Execution ${executionId} did not return an issueId.`);
+    }
+    return {
+      executionId: String(exec.id ?? executionId),
+      issueId,
+      issueKey: exec.issueKey,
+      cycleName: exec.cycleName,
+      currentDefects: this.extractDefectKeys(exec.defects),
+    };
+  }
+
+  private extractDefectKeys(defects: RawZapiSingleExecution['defects']): string[] {
+    if (!Array.isArray(defects)) return [];
+    return defects
+      .map(d => (typeof d === 'string' ? d : d?.key ?? d?.defectKey ?? ''))
+      .filter((k): k is string => Boolean(k));
+  }
+
+  // Union current + new defect keys unless replacing. Returns the final list.
+  private mergeDefects(current: string[], toAdd: string[], replace: boolean): string[] {
+    if (replace) return [...new Set(toAdd)];
+    return [...new Set([...current, ...toAdd])];
+  }
+
+  // Attach defects to an EXECUTION via PUT /rest/zapi/latest/execution/{id}/execute.
+  // This mirrors the JIRA UI call and also auto-creates the native JIRA link.
+  // When dryRun is true, returns the payload without writing.
+  async linkDefectsToExecution(
+    resolved: ResolvedExecutionForDefects,
+    defectKeys: string[],
+    options: { replace?: boolean; dryRun?: boolean } = {}
+  ): Promise<DefectLinkTargetResult> {
+    const before = resolved.currentDefects;
+    const after = this.mergeDefects(before, defectKeys, Boolean(options.replace));
+    const added = after.filter(k => !before.includes(k));
+    const result: DefectLinkTargetResult = {
+      target: 'execution',
+      id: resolved.executionId,
+      before,
+      after,
+      added,
+      written: false,
+    };
+    if (options.dryRun) return result;
+    try {
+      await this.zapi.put(`/execution/${resolved.executionId}/execute`, {
+        defectList: after,
+        issueId: Number(resolved.issueId) || resolved.issueId,
+        comment: '',
+        updateDefectList: 'true',
+        changeAssignee: false,
+      });
+      result.written = true;
+    } catch (error: any) {
+      result.error = error.response?.data?.message || error.message;
+    }
+    return result;
+  }
+
+  // Attach defects to a single STEP RESULT via PUT /stepResult/{stepResultId}.
+  // Reads the step's current defects first so merge does not drop existing links.
+  async linkDefectsToStepResult(
+    stepResultId: string,
+    defectKeys: string[],
+    options: { replace?: boolean; dryRun?: boolean } = {}
+  ): Promise<DefectLinkTargetResult> {
+    let before: string[] = [];
+    try {
+      const cur = await this.zapi.get<RawZapiSingleExecution>(`/stepResult/${stepResultId}`);
+      before = this.extractDefectKeys(cur.data?.defects);
+    } catch {
+      before = [];
+    }
+    const after = this.mergeDefects(before, defectKeys, Boolean(options.replace));
+    const added = after.filter(k => !before.includes(k));
+    const result: DefectLinkTargetResult = {
+      target: 'stepResult',
+      id: String(stepResultId),
+      before,
+      after,
+      added,
+      written: false,
+    };
+    if (options.dryRun) return result;
+    try {
+      await this.zapi.put(`/stepResult/${stepResultId}`, {
+        updateDefectList: 'true',
+        defectList: after,
+      });
+      result.written = true;
+    } catch (error: any) {
+      result.error = error.response?.data?.message || error.message;
+    }
+    return result;
   }
 
   private async getExecutionsForIssueId(issueId: string): Promise<ZephyrTestExecution[]> {

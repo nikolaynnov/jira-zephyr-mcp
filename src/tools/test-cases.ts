@@ -30,6 +30,7 @@ const toExecutionView = (execution: ZephyrTestExecution) => ({
   executedOn: execution.executedOn,
   executedBy: execution.executedBy,
   comment: execution.comment,
+  stepDefectCount: execution.stepDefectCount
 });
 
 export const createTestCase = async (_input: unknown) => {
