@@ -8,7 +8,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { readJiraIssue } from './tools/jira-issues.js';
-import { createTestPlan, listTestPlans } from './tools/test-plans.js';
 import { createTestCycle, listTestCycles } from './tools/test-cycles.js';
 import {
   executeTest,
@@ -27,8 +26,6 @@ import {
 } from './tools/test-cases.js';
 import {
   readJiraIssueSchema,
-  createTestPlanSchema,
-  listTestPlansSchema,
   createTestCycleSchema,
   listTestCyclesSchema,
   executeTestSchema,
@@ -43,8 +40,6 @@ import {
   getTestCaseExecutionsSchema,
   createMultipleTestCasesSchema,
   ReadJiraIssueInput,
-  CreateTestPlanInput,
-  ListTestPlansInput,
   CreateTestCycleInput,
   ListTestCyclesInput,
   ExecuteTestInput,
@@ -86,34 +81,6 @@ const TOOLS = [
         fields: { type: 'array', items: { type: 'string' }, description: 'Specific fields to retrieve (optional)' },
       },
       required: ['issueKey'],
-    },
-  },
-  {
-    name: 'create_test_plan',
-    description: '[NOT SUPPORTED] Test plans do not exist in Zephyr for JIRA (Zephyr Squad). Returns an unsupported-feature error.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Test plan name' },
-        description: { type: 'string', description: 'Test plan description (optional)' },
-        projectKey: { type: 'string', description: 'JIRA project key' },
-        startDate: { type: 'string', description: 'Planned start date (ISO format, optional)' },
-        endDate: { type: 'string', description: 'Planned end date (ISO format, optional)' },
-      },
-      required: ['name', 'projectKey'],
-    },
-  },
-  {
-    name: 'list_test_plans',
-    description: '[NOT SUPPORTED] Test plans do not exist in Zephyr for JIRA (Zephyr Squad). Returns an unsupported-feature error.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        projectKey: { type: 'string', description: 'JIRA project key' },
-        limit: { type: 'number', description: 'Maximum number of results (default: 50)' },
-        offset: { type: 'number', description: 'Number of results to skip (default: 0)' },
-      },
-      required: ['projectKey'],
     },
   },
   {
@@ -402,30 +369,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: JSON.stringify(await readJiraIssue(validatedArgs), null, 2),
-            },
-          ],
-        };
-      }
-
-      case 'create_test_plan': {
-        const validatedArgs = validateInput<CreateTestPlanInput>(createTestPlanSchema, args, 'create_test_plan');
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(await createTestPlan(validatedArgs), null, 2),
-            },
-          ],
-        };
-      }
-
-      case 'list_test_plans': {
-        const validatedArgs = validateInput<ListTestPlansInput>(listTestPlansSchema, args, 'list_test_plans');
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(await listTestPlans(validatedArgs), null, 2),
             },
           ],
         };

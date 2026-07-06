@@ -30,6 +30,11 @@ const PROJECT_ID_OVERRIDE = process.env.PROBE_PROJECT_ID || ''; // e.g. 10660 fo
 const INSECURE_TLS = /^(1|true|yes)$/i.test(process.env.PROBE_INSECURE_TLS || '');
 // A label expected to exist on some Test issues, used to validate JQL label filtering.
 const PROBE_LABEL = process.env.PROBE_LABEL || 'modules';
+// Concrete example of an already-linked defect<->test pair used to reverse-engineer
+// how "link_tests_to_issues" (execution -> issue) is stored. IPLUS-42214 is a defect
+// linked to Test QA-1157 with "Affects test execution of"; override via .env.
+const PROBE_DEFECT_KEY = process.env.PROBE_DEFECT_KEY || 'IPLUS-42214';
+const PROBE_LINKED_TEST_KEY = process.env.PROBE_LINKED_TEST_KEY || 'QA-1157';
 // JIRA is usually an internal host that must be reached directly. axios otherwise
 // routes through the corporate forward proxy (HTTP(S)_PROXY env) which cannot reach
 // internal hosts and returns 502. Bypass it by default; opt back in with PROBE_USE_PROXY=1.
@@ -184,6 +189,7 @@ const main = async (): Promise<void> => {
 
   // 4. search_test_cases (in Zephyr Squad a test case is a JIRA issue of the "Test" type)
   let sampleTestIssueId = '';
+  let sampleTestIssueKey = '';
   // An issue id known to have executions (filled in by the cycle executions probe),
   // preferred for the issueId probe so it exercises a non-empty response.
   let executedIssueId = '';
@@ -195,6 +201,7 @@ const main = async (): Promise<void> => {
       params: { jql: testJql, maxResults: 1, fields: 'summary' },
     });
     sampleTestIssueId = data.issues?.[0]?.id || '';
+    sampleTestIssueKey = data.issues?.[0]?.key || '';
     return { http: status, note: `${data.total ?? 0} issue(s) for jql` };
   });
 
@@ -359,6 +366,139 @@ const main = async (): Promise<void> => {
     );
   }
 
+  // 9b. link_tests_to_issues (WRITE tool design probe) — READ-ONLY inspection.
+  //     "Link a test to issues" has two plausible meanings on this platform:
+  //       (A) a native JIRA issue link (Test issue <-> other issue) created via
+  //           POST /rest/api/2/issueLink, which needs a link TYPE name. We can
+  //           read the available types and any existing links without writing.
+  //       (B) attach a DEFECT to a Zephyr execution (the failed-run -> bug case),
+  //           which is a ZAPI write; here we only confirm the read shape exists.
+  //     These probes gather the facts needed to design the tool (esp. the link
+  //     type the current schema is missing) without performing any write.
+  await probe('link types (issueLinkType)', 'GET /rest/api/2/issueLinkType', async () => {
+    const { data, status } = await http.get('/rest/api/2/issueLinkType');
+    const types: any[] = data?.issueLinkTypes ?? [];
+    const names = types.map((t) => t?.name).filter(Boolean);
+    console.log('\n--- available JIRA issue link types ---');
+    for (const t of types.slice(0, 12)) {
+      console.log(`  ${t?.name}: inward="${t?.inward}", outward="${t?.outward}"`);
+    }
+    console.log('--- end link types ---\n');
+    return { http: status, note: `${names.length} type(s): ${names.slice(0, 6).join(', ')}` };
+  });
+
+  // 9c. existing issue links on a real Test issue — shows the payload shape a
+  //     link-reading/creating tool would produce, and whether Test issues
+  //     already carry links (Tests, blocks, relates, defect, etc.).
+  if (sampleTestIssueKey) {
+    await probe('issue links (read Test issue)', `GET /rest/api/2/issue/${sampleTestIssueKey}?fields=issuelinks`, async () => {
+      const { data, status } = await http.get(`/rest/api/2/issue/${sampleTestIssueKey}`, {
+        params: { fields: 'issuelinks' },
+      });
+      const links: any[] = data?.fields?.issuelinks ?? [];
+      const sample = links.slice(0, 3).map((l) => {
+        const other = l?.outwardIssue || l?.inwardIssue;
+        const dir = l?.outwardIssue ? l?.type?.outward : l?.type?.inward;
+        return `${l?.type?.name}/${dir} -> ${other?.key}`;
+      });
+      return { http: status, note: `${links.length} link(s) on ${sampleTestIssueKey}${sample.length ? '; ' + sample.join('; ') : ''}` };
+    });
+  } else {
+    skip('issue links (read Test issue)', 'GET /rest/api/2/issue/{key}?fields=issuelinks', 'no Test issue found to probe');
+  }
+
+  // 9d. link_tests_to_issues PIVOT (execution -> issue defect link).
+  //     User picked the SECOND meaning: attach a defect to a test's EXECUTION,
+  //     rendered in JIRA as "Affects test execution of" on the defect. That
+  //     relation is NOT in the 13 issueLinkType results, so it is ZAPI-managed,
+  //     not POST /rest/api/2/issueLink. Reverse-engineer it from a known pair
+  //     (defect PROBE_DEFECT_KEY <-> test PROBE_LINKED_TEST_KEY) — READ-ONLY.
+
+  // 9d-1. Does the defect expose the relation as a native JIRA issue link?
+  //       If issuelinks is empty here, the link truly lives only in ZAPI.
+  await probe('defect issue links (native?)', `GET /rest/api/2/issue/${PROBE_DEFECT_KEY}?fields=issuelinks`, async () => {
+    const { data, status } = await http.get(`/rest/api/2/issue/${PROBE_DEFECT_KEY}`, {
+      params: { fields: 'issuelinks' },
+    });
+    const links: any[] = data?.fields?.issuelinks ?? [];
+    const sample = links.slice(0, 5).map((l) => {
+      const other = l?.outwardIssue || l?.inwardIssue;
+      const dir = l?.outwardIssue ? l?.type?.outward : l?.type?.inward;
+      return `${l?.type?.name}/${dir} -> ${other?.key}`;
+    });
+    return { http: status, note: `${links.length} native link(s) on ${PROBE_DEFECT_KEY}${sample.length ? '; ' + sample.join('; ') : ''}` };
+  });
+
+  // 9d-2. ZAPI: list the executions of the linked test, then look for the
+  //       defect among each execution's defect fields. Confirms the link is
+  //       stored at execution level and reveals the executionId a write tool
+  //       would target plus the exact field carrying the defect key.
+  await probe('execution defects (linked test)', `GET /rest/zapi/latest/execution?issueId=<${PROBE_LINKED_TEST_KEY}>`, async () => {
+    const issueRes = await http.get(`/rest/api/2/issue/${PROBE_LINKED_TEST_KEY}`, { params: { fields: 'summary' } });
+    const linkedTestId = issueRes.data?.id;
+    if (!linkedTestId) return { http: issueRes.status, note: `could not resolve id for ${PROBE_LINKED_TEST_KEY}` };
+    const { data, status } = await http.get('/rest/zapi/latest/execution', { params: { issueId: linkedTestId } });
+    const execs: any[] = data?.executions ?? [];
+    const first = execs[0];
+    const fields = first ? Object.keys(first).filter(k => /defect/i.test(k)).join(',') || 'none' : 'none';
+    const hit = execs.find((e: any) =>
+      JSON.stringify(e).includes(PROBE_DEFECT_KEY));
+    console.log('\n--- linked-test execution defect fields ---');
+    if (hit) {
+      console.log(JSON.stringify({
+        executionId: hit.id,
+        cycleName: hit.cycleName,
+        status: hit.status?.name ?? hit.executionStatus,
+        executionDefects: hit.executionDefects,
+        defectList: hit.defectList,
+        defects: hit.defects,
+      }, null, 2));
+    } else {
+      console.log(`defect ${PROBE_DEFECT_KEY} not found inline; defect-ish fields on first exec: ${fields}`);
+    }
+    console.log('--- end linked-test execution defects ---\n');
+    return { http: status, note: `${execs.length} execution(s) of ${PROBE_LINKED_TEST_KEY}; ${hit ? `defect on execId=${hit.id}` : 'defect not inline'}` };
+  });
+
+  // 9d-3. Discover the ZAPI defect/link-write surface without calling it.
+  //       NOTE: GET-probing turned out UNRELIABLE here — ZAPI returns 404 (not
+  //       405) for unknown method+path, so a GET on a POST-only route can't be
+  //       distinguished from a missing route. Kept as documentation of what was
+  //       tried. Follow-up leads to verify (from ZAPI 5.x, user-provided):
+  //         (a) POST /rest/zapi/latest/test/addIssueLink?parentIssueId=&testcaseId=
+  //             — likely what the ORIGINAL pre-fork code meant (test-case ->
+  //             issue coverage link; matches old Scale POST /testcases/{id}/links).
+  //         (b) POST/GET /rest/zapi/latest/teststep/issueId/{id} — step-level
+  //             defects; needs testStep tooling we don't have yet.
+  //       User will confirm tomorrow how links are set manually in the UI before
+  //       we pick the endpoint. NO write is performed here.
+  await probe('ZAPI defect/link-write surface (unreliable: 404!=405)', 'GET candidate endpoints', async () => {
+    // Resolve a real executionId that already carries the sample defect.
+    const issueRes = await http.get(`/rest/api/2/issue/${PROBE_LINKED_TEST_KEY}`, { params: { fields: 'summary' } });
+    const linkedTestId = issueRes.data?.id;
+    let execId = '';
+    if (linkedTestId) {
+      const execRes = await http.get('/rest/zapi/latest/execution', { params: { issueId: linkedTestId } });
+      const execs: any[] = execRes.data?.executions ?? [];
+      const hit = execs.find((e: any) => JSON.stringify(e).includes(PROBE_DEFECT_KEY)) || execs[0];
+      execId = hit ? String(hit.id) : '';
+    }
+    const candidates = [
+      `/rest/zapi/latest/execution/${execId || '0'}/defect`,
+      `/rest/zapi/latest/execution/${execId || '0'}`,
+      // user-provided leads (POST routes; GET here only to see if path resolves):
+      '/rest/zapi/latest/test/addIssueLink',
+      linkedTestId ? `/rest/zapi/latest/teststep/issueId/${linkedTestId}` : '/rest/zapi/latest/teststep/issueId/0',
+    ];
+    console.log('\n--- ZAPI defect/link-write candidate endpoints (GET only; 404 is inconclusive) ---');
+    for (const path of candidates) {
+      const r = await http.get(path, { validateStatus: () => true });
+      console.log(`  ${r.status}  GET ${path}`);
+    }
+    console.log('--- end candidate endpoints ---\n');
+    return { http: 200, note: `probed ${candidates.length} candidates for execId=${execId || 'n/a'} (GET status is not conclusive for POST routes)` };
+  });
+
   // 10. ZQL execution search — the potential one-call answer to
   //     "executions with label=X and status=FAIL in cycle/version Y".
   //     ZQL is Zephyr's own query language (distinct from Jira's JQL) and runs
@@ -485,7 +625,6 @@ const main = async (): Promise<void> => {
   const skipped = results.filter((r) => r.status === 'SKIP').length;
   console.log('\n----------------------------------------');
   console.log(`Summary: ${ok} OK, ${fail} FAIL, ${skipped} SKIP  (of ${results.length})`);
-  console.log('Excluded on purpose: create_test_plan / list_test_plans - Zephyr Squad has no Test Plan concept.');
 
   process.exit(fail > 0 ? 1 : 0);
 };

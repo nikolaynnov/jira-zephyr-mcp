@@ -1,7 +1,7 @@
 # JIRA Zephyr MCP Server
 [![License: MIT + NPF 1.0](https://img.shields.io/badge/License-MIT%20%2B%20NPF%201.0-e25822.svg)](LICENSE)
 
-A Model Context Protocol (MCP) server that provides comprehensive integration with JIRA's Zephyr test management system. This server enables seamless test management operations including creating test plans, managing test cycles, executing tests, and reading JIRA issues.
+A Model Context Protocol (MCP) server that provides comprehensive integration with JIRA's Zephyr test management system. This server enables seamless test management operations including managing test cycles, executing tests, and reading JIRA issues.
 
 ## Fork: JIRA 8.12 Server + Zephyr for JIRA 5.6.3
 
@@ -33,10 +33,6 @@ A Model Context Protocol (MCP) server that provides comprehensive integration wi
 | Test case | first-class entity | a JIRA issue of type `Test` (+ ZAPI test steps) |
 | Test cycle | `testcycles` | ZAPI `cycle` (needs numeric `projectId` / `versionId`) |
 | Execution status | `PASS` / `FAIL` / `WIP` / `BLOCKED` | numeric IDs (1/2/3/4, `-1` unexecuted; configurable) |
-| **Test plan** | supported | **not supported** - no such concept in Zephyr Squad |
-
-> `create_test_plan` and `list_test_plans` will be disabled in this fork with an
-> explicit "not supported in Zephyr Squad" message.
 
 ### API compatibility probe
 
@@ -62,7 +58,6 @@ and the read-only tool that depends on it.
 ## Features
 
 ### Core Capabilities
-- **Test Plan Management**: Create and list test plans in Zephyr
 - **Test Cycle Management**: Create and manage test execution cycles
 - **JIRA Integration**: Read JIRA issue details and metadata
 - **Test Execution**: Update test execution results and status
@@ -82,11 +77,9 @@ and the read-only tool that depends on it.
 6. **search_test_cases** - Search test cases (JIRA Test issues) with structured filters: `text` (free-text keyword match, not JQL), `labels` and `components` (exact, match any of the given values)
 7. **get_test_case** - Get a test case with its Zephyr steps; optional `includeExecutions` adds its run history
 8. **get_test_case_executions** - Execution history of a single test across all cycles, newest first (status, date, executor, cycle, version/release); also returns the test's labels and components at the top level
-9. **search_test_executions** - Search test executions (runs) server-side via ZQL. Answers "which tests with label X failed or were not run in release Y (Windows and Linux)" in a single call. Structured filters (`labels`, `components`, `status`, `fixVersions`, `cycleNameContains`, `cycleNames`) combine with AND and match any of their values; a raw `zql` escape hatch is available and, when set, takes priority and ignores the structured filters. Each returned execution also lists any linked defects (`defectKeys` plus `defects[]` with `key`, `summary`, `status`, and a ready-to-open `url`), so a failed run links straight to its bug reports
+9. **search_test_executions** - Search test executions (runs) server-side via ZQL. Answers "which tests with label X failed or were not run in release Y (Windows and Linux)" in a single call. Structured filters (`labels`, `components`, `status`, `fixVersions`, `cycleNameContains`, `cycleNames`) combine with AND and match any of their values; a raw `zql` escape hatch is available and, when set, takes priority and ignores the structured filters. Each returned execution also lists any linked defects (`defectKeys` plus `defects[]` with `key`, `summary`, `status`, and a ready-to-open `url`)
 
 **Not implemented in the current read-only iteration** (return an explanatory error): `create_test_cycle`, `execute_test`, `link_tests_to_issues`, `create_test_case`, `create_multiple_test_cases`.
-
-**Not supported on Zephyr Squad** (the platform has no Test Plan concept): `create_test_plan`, `list_test_plans`.
 
 ## Prerequisites
 
@@ -246,17 +239,6 @@ await readJiraIssue({
 });
 ```
 
-### Creating Test Plans
-```typescript
-await createTestPlan({
-  name: "Release 2.0 Test Plan",
-  description: "Comprehensive testing for release 2.0",
-  projectKey: "ABC",
-  startDate: "2024-01-15",
-  endDate: "2024-01-30"
-});
-```
-
 ### Managing Test Cycles
 ```typescript
 // Create a test cycle
@@ -330,9 +312,8 @@ src/
 │   └── zephyr-client.ts  # Zephyr Squad ZAPI client (read-only)
 ├── tools/                # MCP tool implementations
 │   ├── jira-issues.ts    # JIRA issue tools
-│   ├── test-plans.ts     # Test plans (not supported on Zephyr Squad)
 │   ├── test-cycles.ts    # Test cycle management
-│   ├── test-cases.ts     # Test case tools
+│   ├── test-cases.ts     # Test case search / get / execution history
 │   └── test-execution.ts # Test execution tools
 ├── types/                # TypeScript type definitions
 │   ├── jira-types.ts     # JIRA API types
