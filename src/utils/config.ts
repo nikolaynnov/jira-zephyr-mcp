@@ -91,15 +91,15 @@ export const getConfiguredTestIssueType = (): string | undefined =>
   getAppConfig().JIRA_TEST_ISSUE_TYPE?.trim() || undefined;
 
 // Shared axios options for every request to the JIRA host (REST + ZAPI).
-// JIRA is usually an internal host: bypass the corporate forward proxy by
-// default (it returns 502 for internal hosts) and present a browser-like
-// User-Agent since some reverse proxies reject the default axios UA.
+// JIRA is usually an internal host, so bypass the corporate forward proxy by
+// default (it returns 502 for internal hosts).
+//
+// NOTE: do NOT set a custom User-Agent here. A browser-like UA makes write
+// operations (e.g. PUT /execution/{id}/execute) fail with 403 on this server,
+// so we deliberately let axios send its default UA.
 export const getHttpClientOptions = () => {
   const useProxy = isTruthy(process.env.JIRA_USE_PROXY);
   const insecureTls = isTruthy(process.env.JIRA_INSECURE_TLS);
-  const userAgent =
-    process.env.JIRA_USER_AGENT ||
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
   const auth = getJiraAuth();
 
@@ -111,7 +111,6 @@ export const getHttpClientOptions = () => {
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      //'User-Agent': userAgent, // если указать User-Agent, то на Write операциях будет 403 ошибка
       ...(auth.type === 'bearer' ? { Authorization: `Bearer ${auth.token}` } : {}),
     },
     timeout: 30000,

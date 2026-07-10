@@ -218,7 +218,7 @@ export interface ZephyrTestExecution {
   cycleId?: string;
   cycleName?: string;
   versionName?: string;
-  stepDefectCount?: string;
+  stepDefectCount?: number;
 }
 
 // A single row returned by the ZQL execution search (search_test_executions).
