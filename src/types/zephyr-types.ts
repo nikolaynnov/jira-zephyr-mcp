@@ -254,8 +254,16 @@ export interface ZephyrLinkedDefect {
 }
 
 export interface ZephyrExecutionSearchResult {
+  // Server's genuine match count for the query (not the page size).
   total: number;
+  // Rows returned in THIS page (<= limit).
   count: number;
+  // Offset this page started at (0-based).
+  offset: number;
+  // True when more rows exist beyond this page (offset + count < total).
+  hasMore: boolean;
+  // Offset to pass next to continue paging; undefined when hasMore is false.
+  nextOffset?: number;
   zql: string;
   executions: ZephyrExecutionSearchRow[];
 }

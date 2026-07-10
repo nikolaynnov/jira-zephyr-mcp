@@ -280,7 +280,7 @@ const TOOLS = [
   {
     name: 'search_test_executions',
     annotations: { readOnlyHint: true },
-    description: 'Search test EXECUTIONS (runs) server-side via ZQL (Zephyr Query Language), which queries executions rather than issues. All structured filters are optional and combine with AND; array filters match ANY of their values. Each returned execution includes any LINKED DEFECTS (defectKeys + defects[] with key/summary/status). IMPORTANT: if `zql` is provided, ALL structured filters are ignored and the raw ZQL is used as-is.',
+    description: 'Search and LIST individual test EXECUTIONS (runs) server-side via ZQL (Zephyr Query Language), which queries executions rather than issues. All structured filters are optional and combine with AND; array filters match ANY of their values. Each returned execution includes any LINKED DEFECTS (defectKeys + defects[] with key/summary/status). Returns one PAGE of rows: `total` is the full match count, `count` is rows in this page, and when more exist `hasMore` is true and `nextOffset` gives the offset to pass next. Page with `limit` (max 200) + `offset`. IMPORTANT: for aggregate/whole-period questions ("over the last year, which cycles stand out?", per-cycle pass/fail counts) do NOT page through everything here - use aggregate_executions_by_cycle, which rolls up all matches by cycle in one call. If `zql` is provided, ALL structured filters are ignored and the raw ZQL is used as-is.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -292,7 +292,8 @@ const TOOLS = [
         cycleNameContains: { type: 'string', description: 'Substring match on cycle name, e.g. "2026.2" matches "Linux ... 2026.2", "Windows ... 2026.2"' },
         cycleNames: { type: 'array', items: { type: 'string' }, description: 'Exact cycle names (use when you know the full cycle titles)' },
         zql: { type: 'string', description: 'Raw ZQL escape hatch for power users. When set, this takes PRIORITY and all structured filters above are IGNORED. Example: project = "QA" AND labels = "modules" AND executionStatus IN (-1, 2)' },
-        limit: { type: 'number', description: 'Maximum number of executions to return (default: 50)' },
+        limit: { type: 'number', description: 'Page size: max executions to return in one call (default: 50, max: 200)' },
+        offset: { type: 'number', description: '0-based pagination offset (default: 0). Pass the previous response\'s nextOffset to fetch the next page.' },
       },
       required: ['projectKey'],
     },

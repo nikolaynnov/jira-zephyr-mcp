@@ -195,7 +195,8 @@ export const searchTestExecutions = async (input: SearchTestExecutionsInput) => 
         cycleNames: validatedInput.cycleNames,
         zql: validatedInput.zql,
       },
-      validatedInput.limit
+      validatedInput.limit,
+      validatedInput.offset
     );
 
     return {
@@ -203,6 +204,9 @@ export const searchTestExecutions = async (input: SearchTestExecutionsInput) => 
       data: {
         total: result.total,
         count: result.count,
+        offset: result.offset,
+        hasMore: result.hasMore,
+        nextOffset: result.nextOffset,
         zql: result.zql,
         executions: result.executions,
       },

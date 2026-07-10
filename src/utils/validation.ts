@@ -117,7 +117,13 @@ export const searchTestExecutionsSchema = z.object({
   cycleNames: z.array(z.string().min(1)).optional(),
   // Escape hatch: raw ZQL. When set, ALL structured params above are ignored.
   zql: z.string().optional(),
-  limit: z.number().min(1).max(100).default(50),
+  // Page size (rows returned in one call). The underlying ZQL search is not
+  // capped server-side, but raw rows are kept bounded to protect the model's
+  // context; page with `offset` for more, or use aggregate_executions_by_cycle
+  // for whole-period questions.
+  limit: z.number().min(1).max(200).default(50),
+  // 0-based offset for pagination. Use the response's `nextOffset` to continue.
+  offset: z.number().min(0).default(0),
 });
 
 export const aggregateExecutionsByCycleSchema = z.object({

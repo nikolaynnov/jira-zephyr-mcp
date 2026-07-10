@@ -223,20 +223,26 @@ export class ZephyrClient {
       cycleNames?: string[];
       zql?: string;
     } = {},
-    limit = 50
+    limit = 50,
+    offset = 0
   ): Promise<ZephyrExecutionSearchResult> {
     const zql = options.zql && options.zql.trim()
       ? options.zql.trim()
       : this.buildZql(projectKey, options);
 
     const response = await this.zapi.get<RawZqlExecutionResponse>('/zql/executeSearch', {
-      params: { zqlQuery: zql, maxRecords: limit },
+      params: { zqlQuery: zql, maxRecords: limit, offset },
     });
     const rows = response.data?.executions || [];
     const total = response.data?.totalCount ?? response.data?.executionsCount ?? rows.length;
+    const count = rows.length;
+    const hasMore = offset + count < total;
     return {
       total,
-      count: rows.length,
+      count,
+      offset,
+      hasMore,
+      nextOffset: hasMore ? offset + count : undefined,
       zql,
       // ZQL rows carry no executedOnVal, so keep the server's own order.
       executions: rows.map(row => this.normalizeZqlExecution(row)),
