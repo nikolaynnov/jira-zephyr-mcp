@@ -48,6 +48,9 @@ export const linkDefectToExecutionSchema = z
     defectKeys: z.array(z.string().min(1)).min(1, 'At least one defect key is required'),
     // Optional step results to also attach the defects to (by stepResultId).
     stepResultIds: z.array(z.string().min(1)).optional(),
+    // Alternative to stepResultIds: 1-based step order numbers (orderId). The tool
+    // fetches the execution's step results and resolves each orderId to a stepResultId.
+    orderIds: z.array(z.number().int().positive()).optional(),
     // Merge (default) keeps existing defects; replace overwrites the list.
     replace: z.boolean().default(false),
     // Preview the payload(s) without writing.

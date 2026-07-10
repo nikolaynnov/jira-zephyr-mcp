@@ -531,6 +531,21 @@ export class ZephyrClient {
     };
   }
 
+  // ---- step results --------------------------------------------------------
+
+  // GET /rest/zapi/latest/stepResult?executionId={execId} returns a list of
+  // step results with their ids. This is needed to link defects at the step level.
+  async getStepResults(executionId: string): Promise<{ id: string; order: number; status: string }[]> {
+    const response = await this.zapi.get('/stepResult', { params: { executionId } });
+    // ZAPI returns { stepResults: [...] } or a bare array.
+    const list = response.data?.stepResults ?? response.data ?? [];
+    return (Array.isArray(list) ? list : []).map((s: any) => ({
+      id: String(s.id),
+      order: s.orderId ?? s.order ?? s.stepOrder ?? 0,
+      status: s.status ?? s.executionStatus ?? '',
+    }));
+  }
+
   // ---- defect linking (write) --------------------------------------------
 
   // Resolve the execution to attach defects to, either directly by executionId

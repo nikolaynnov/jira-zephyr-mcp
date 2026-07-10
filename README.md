@@ -84,7 +84,7 @@ and the read-only tool that depends on it.
 
 **Write (implemented for this fork):**
 
-10. **link_defect_to_execution** - Attach one or more JIRA defect issues to a test execution's **Defects** field (the same action as the Zephyr UI, which also auto-creates the native bidirectional JIRA link). Identify the execution by `executionId`, or by `testKey` + `cycleName` (the tool resolves the execution and its `issueId`). Existing defects are preserved and merged by default; set `replace: true` to overwrite. Optionally pass `stepResultIds` to also attach the same defects at the step level. Use `dryRun: true` to preview the resulting defect list per target without writing.
+10. **link_defect_to_execution** - Attach one or more JIRA defect issues to a test execution's **Defects** field (the same action as the Zephyr UI, which also auto-creates the native bidirectional JIRA link). Identify the execution by `executionId`, or by `testKey` + `cycleName` (the tool resolves the execution and its `issueId`). Existing defects are preserved and merged by default; set `replace: true` to overwrite. To also attach the same defects at the step level, pass either `stepResultIds` (internal stepResult IDs) or `orderIds` (1-based step numbers, which the tool resolves to stepResult IDs for the target execution). Use `dryRun: true` to preview the resulting defect list per target without writing.
 
 **Not implemented in the current read-only iteration** (return an explanatory error): `create_test_cycle`, `execute_test`, `create_test_case`, `create_multiple_test_cases`.
 

@@ -159,7 +159,8 @@ const TOOLS = [
     description:
       'Attach one or more JIRA defect issues to a Zephyr test EXECUTION (the "Defects" field). ' +
       'Identify the execution either by executionId, or by testKey + cycleName (the tool resolves the execution ' +
-      'and its issueId). Optionally pass stepResultIds to also attach the same defects at the step level.',
+      'and its issueId). To also attach the same defects at the step level, pass either stepResultIds ' +
+      '(internal stepResult IDs) or orderIds (1-based step numbers, which the tool resolves to stepResult IDs).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -168,6 +169,7 @@ const TOOLS = [
         cycleName: { type: 'string', description: 'Exact test cycle name containing the execution. Used with testKey.' },
         defectKeys: { type: 'array', items: { type: 'string' }, description: 'JIRA defect issue keys to attach (e.g. ["RM-851"]).' },
         stepResultIds: { type: 'array', items: { type: 'string' }, description: 'Optional stepResult IDs to also attach the defects to at step level.' },
+        orderIds: { type: 'array', items: { type: 'integer' }, description: 'Optional 1-based step order numbers to attach the defects to at step level; resolved to stepResult IDs for the target execution. Use instead of stepResultIds when you only know the step position.' },
         replace: { type: 'boolean', description: 'Overwrite the existing defect list instead of merging (default: false).' },
         dryRun: { type: 'boolean', description: 'Preview the resulting defect list per target without writing (default: false).' },
       },

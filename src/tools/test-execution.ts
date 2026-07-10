@@ -84,7 +84,31 @@ export const linkDefectToExecution = async (input: LinkDefectToExecutionInput) =
       await client.linkDefectsToExecution(resolved, validatedInput.defectKeys, writeOptions)
     );
 
-    for (const stepResultId of validatedInput.stepResultIds ?? []) {
+    // Collect step-level targets: explicit stepResultIds plus any resolved from orderIds.
+    const stepResultIds = new Set<string>(validatedInput.stepResultIds ?? []);
+    if (validatedInput.orderIds && validatedInput.orderIds.length > 0) {
+      const steps = await client.getStepResults(resolved.executionId);
+      const idByOrder = new Map(steps.map(s => [s.order, s.id]));
+      for (const orderId of validatedInput.orderIds) {
+        const stepResultId = idByOrder.get(orderId);
+        if (stepResultId) {
+          stepResultIds.add(stepResultId);
+        } else {
+          targets.push({
+            target: 'stepResult',
+            id: `orderId=${orderId}`,
+            before: [],
+            after: [],
+            added: [],
+            written: false,
+            error: `No step with orderId ${orderId} in execution ${resolved.executionId}. ` +
+              `Available orderIds: ${steps.map(s => s.order).join(', ') || '(none)'}`,
+          });
+        }
+      }
+    }
+
+    for (const stepResultId of stepResultIds) {
       targets.push(
         await client.linkDefectsToStepResult(stepResultId, validatedInput.defectKeys, writeOptions)
       );
