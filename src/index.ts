@@ -14,6 +14,7 @@ import {
   getTestExecutionStatus,
   listTestCycleExecutions,
   searchTestExecutions,
+  aggregateExecutionsByCycle,
   linkDefectToExecution,
   generateTestReport,
 } from './tools/test-execution.js';
@@ -32,6 +33,7 @@ import {
   getTestExecutionStatusSchema,
   listTestCycleExecutionsSchema,
   searchTestExecutionsSchema,
+  aggregateExecutionsByCycleSchema,
   linkDefectToExecutionSchema,
   generateTestReportSchema,
   createTestCaseSchema,
@@ -46,6 +48,7 @@ import {
   GetTestExecutionStatusInput,
   ListTestCycleExecutionsInput,
   SearchTestExecutionsInput,
+  AggregateExecutionsByCycleInput,
   LinkDefectToExecutionInput,
   GenerateTestReportInput,
   CreateTestCaseInput,
@@ -295,6 +298,25 @@ const TOOLS = [
     },
   },
   {
+    name: 'aggregate_executions_by_cycle',
+    annotations: { readOnlyHint: true },
+    description: 'Roll up test executions BY CYCLE for whole-period / outlier analysis. Runs one ZQL query (same filters as search_test_executions), paginates ALL matching executions server-side, and returns per-cycle stats - NOT the raw runs. Each cycle carries a full status breakdown (summary: total/passed/failed/blocked/inProgress/notExecuted/passRate, where passRate=passed/total) PLUS completion-adjusted signals: `executed` (passed+failed+blocked) and `failRate` (failed/executed %), which ignore not-yet-run tests so an in-progress cycle is not mistaken for a failing one. Also includes distinct linked-defect counts. Use THIS for questions like "over the last year, which regression/acceptance cycles statistically stand out?"; use search_test_executions only to list individual runs. Scope to a team/group with labels/components (e.g. labels:["modules"]) and to a set of cycles with cycleNameContains (e.g. "Регресс") or fixVersions. Cycles are sorted by failRate DESC (highest-failing first) so quality outliers surface at the top. Do NOT put an executionStatus filter in `zql` - it defeats the breakdown.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectKey: { type: 'string', description: 'JIRA project key (required)' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Scope to executions of test cases having ANY of these labels (exact), e.g. ["modules"]' },
+        components: { type: 'array', items: { type: 'string' }, description: 'Scope to ANY of these components (exact)' },
+        fixVersions: { type: 'array', items: { type: 'string' }, description: 'Scope to ANY of these fix versions / releases (exact, e.g. "2026.2")' },
+        cycleNameContains: { type: 'string', description: 'Substring match on cycle name to select a family of cycles, e.g. "Регресс" or "Приёмк"' },
+        cycleNames: { type: 'array', items: { type: 'string' }, description: 'Exact cycle names (use when you know the full cycle titles)' },
+        zql: { type: 'string', description: 'Raw ZQL escape hatch. When set, ALL structured filters above are IGNORED. Do NOT include an executionStatus filter - it would defeat the per-cycle status breakdown.' },
+        maxExecutions: { type: 'number', description: 'Safety ceiling on executions pulled and aggregated across all pages (default: 10000, max: 50000). If exceeded, the result is flagged truncated:true.' },
+      },
+      required: ['projectKey'],
+    },
+  },
+  {
     name: 'create_multiple_test_cases',
     description: '[READ-ONLY ITERATION] Not implemented yet in this fork. Returns a read-only-iteration error.',
     inputSchema: {
@@ -451,6 +473,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: JSON.stringify(await searchTestExecutions(validatedArgs), null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'aggregate_executions_by_cycle': {
+        const validatedArgs = validateInput<AggregateExecutionsByCycleInput>(aggregateExecutionsByCycleSchema, args, 'aggregate_executions_by_cycle');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(await aggregateExecutionsByCycle(validatedArgs), null, 2),
             },
           ],
         };

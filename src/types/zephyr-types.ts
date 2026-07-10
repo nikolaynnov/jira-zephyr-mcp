@@ -260,6 +260,40 @@ export interface ZephyrExecutionSearchResult {
   executions: ZephyrExecutionSearchRow[];
 }
 
+// One cycle's rolled-up execution stats, produced by aggregateExecutionsByCycle.
+export interface CycleExecutionAggregate {
+  cycleId?: string;
+  cycleName?: string;
+  versionName?: string;
+  // Full status breakdown incl. passRate (= passed / total, matching the other
+  // tools). notExecuted is included here, so passRate is dragged down by cycles
+  // that are simply unfinished.
+  summary: ZephyrExecutionSummary;
+  // Completion-adjusted quality signals for outlier analysis: executed counts
+  // only the runs with a verdict (passed + failed + blocked), and failRate is
+  // failed / executed (%). Unlike passRate these ignore not-yet-run tests, so an
+  // in-progress cycle doesn't masquerade as a failing one. failRate is 0 when
+  // nothing has been executed yet.
+  executed: number;
+  failRate: number;
+  // Distinct defect issue keys linked to any execution in this cycle.
+  defectCount: number;
+  // Capped sample of those defect keys (full count is defectCount).
+  defectKeys: string[];
+}
+
+export interface AggregateExecutionsByCycleResult {
+  zql: string;
+  // Server's genuine match count for the query (not capped).
+  totalMatched: number;
+  // How many executions were actually pulled and aggregated (<= maxExecutions).
+  executionsScanned: number;
+  // True when totalMatched > executionsScanned (hit the maxExecutions ceiling).
+  truncated: boolean;
+  cycleCount: number;
+  cycles: CycleExecutionAggregate[];
+}
+
 export interface ZephyrTestStep {
   id: number;
   orderId: number;

@@ -3,11 +3,13 @@ import {
   getTestExecutionStatusSchema,
   listTestCycleExecutionsSchema,
   searchTestExecutionsSchema,
+  aggregateExecutionsByCycleSchema,
   generateTestReportSchema,
   linkDefectToExecutionSchema,
   GetTestExecutionStatusInput,
   ListTestCycleExecutionsInput,
   SearchTestExecutionsInput,
+  AggregateExecutionsByCycleInput,
   GenerateTestReportInput,
   LinkDefectToExecutionInput,
 } from '../utils/validation.js';
@@ -204,6 +206,35 @@ export const searchTestExecutions = async (input: SearchTestExecutionsInput) => 
         zql: result.zql,
         executions: result.executions,
       },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message,
+    };
+  }
+};
+
+export const aggregateExecutionsByCycle = async (input: AggregateExecutionsByCycleInput) => {
+  const validatedInput = aggregateExecutionsByCycleSchema.parse(input);
+
+  try {
+    const result = await getZephyrClient().aggregateExecutionsByCycle(
+      validatedInput.projectKey,
+      {
+        labels: validatedInput.labels,
+        components: validatedInput.components,
+        fixVersions: validatedInput.fixVersions,
+        cycleNameContains: validatedInput.cycleNameContains,
+        cycleNames: validatedInput.cycleNames,
+        zql: validatedInput.zql,
+      },
+      validatedInput.maxExecutions
+    );
+
+    return {
+      success: true,
+      data: result,
     };
   } catch (error: any) {
     return {

@@ -120,6 +120,25 @@ export const searchTestExecutionsSchema = z.object({
   limit: z.number().min(1).max(100).default(50),
 });
 
+export const aggregateExecutionsByCycleSchema = z.object({
+  projectKey: z.string().min(1, 'Project key is required'),
+  // Structured filters -> ZQL clauses (ignored entirely if `zql` is provided).
+  // Scope to a group via labels/components (e.g. labels: ["modules"]).
+  labels: z.array(z.string().min(1)).optional(),
+  components: z.array(z.string().min(1)).optional(),
+  fixVersions: z.array(z.string().min(1)).optional(),
+  // cycleName ~ "..." (substring: e.g. "Регресс" matches all regression cycles).
+  cycleNameContains: z.string().optional(),
+  // cycleName IN (...) exact cycle names.
+  cycleNames: z.array(z.string().min(1)).optional(),
+  // Escape hatch: raw ZQL. When set, ALL structured filters above are ignored.
+  // Note: do NOT add an executionStatus filter here - it defeats the per-cycle
+  // status breakdown this tool is built to compute.
+  zql: z.string().optional(),
+  // Safety ceiling on executions pulled and aggregated across all pages.
+  maxExecutions: z.number().min(1).max(50000).default(10000),
+});
+
 export const getTestCaseSchema = z.object({
   testCaseId: z.string().min(1, 'Test case ID is required'),
   includeExecutions: z.boolean().default(false),
@@ -145,6 +164,7 @@ export type GenerateTestReportInput = z.infer<typeof generateTestReportSchema>;
 export type CreateTestCaseInput = z.infer<typeof createTestCaseSchema>;
 export type SearchTestCasesInput = z.infer<typeof searchTestCasesSchema>;
 export type SearchTestExecutionsInput = z.infer<typeof searchTestExecutionsSchema>;
+export type AggregateExecutionsByCycleInput = z.infer<typeof aggregateExecutionsByCycleSchema>;
 export type GetTestCaseInput = z.infer<typeof getTestCaseSchema>;
 export type GetTestCaseExecutionsInput = z.infer<typeof getTestCaseExecutionsSchema>;
 export type CreateMultipleTestCasesInput = z.infer<typeof createMultipleTestCasesSchema>;

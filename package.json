@@ -13,8 +13,7 @@
     "check-api": "tsx scripts/check-api.ts",
     "check-link-defect": "tsx scripts/check-link-defect.ts",
     "link-defect-write": "tsx scripts/link-defect-write.ts",
-    "diag-write": "tsx scripts/diag-write.ts",
-    "diag-ao": "tsx scripts/diag-ao.ts"
+    "diag-cap500": "tsx scripts/diag-cap500.ts"
   },
   "keywords": ["mcp", "jira", "zephyr", "test-management", "testing"],
   "author": "",

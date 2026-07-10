@@ -20,6 +20,8 @@ import {
   ZephyrExecutionSearchResult,
   ZephyrExecutionSearchRow,
   ZephyrExecutionSummary,
+  AggregateExecutionsByCycleResult,
+  CycleExecutionAggregate,
   ZephyrLinkedDefect,
   ZephyrTestCase,
   ZephyrTestCycle,
@@ -282,6 +284,128 @@ export class ZephyrClient {
     }
 
     return clauses.join(' AND ');
+  }
+
+  // Roll up executions by cycle for whole-period / outlier analysis. Runs one
+  // ZQL query (same filters as searchTestExecutions), paginates ALL matches
+  // server-side (verified uncapped), and returns per-cycle status breakdowns -
+  // never the raw rows. This is the right tool for "analyze a year of regression
+  // cycles and flag the ones that stand out"; search_test_executions is for
+  // listing individual runs.
+  async aggregateExecutionsByCycle(
+    projectKey: string,
+    options: {
+      labels?: string[];
+      components?: string[];
+      fixVersions?: string[];
+      cycleNameContains?: string;
+      cycleNames?: string[];
+      zql?: string;
+    } = {},
+    maxExecutions = 10000
+  ): Promise<AggregateExecutionsByCycleResult> {
+    const zql = options.zql && options.zql.trim()
+      ? options.zql.trim()
+      : this.buildZql(projectKey, options);
+
+    const pageSize = 1000;
+    const groups = new Map<string, {
+      cycleId?: string;
+      cycleName?: string;
+      versionName?: string;
+      summary: ZephyrExecutionSummary;
+      defectKeys: Set<string>;
+    }>();
+
+    let totalMatched = 0;
+    let scanned = 0;
+    let offset = 0;
+
+    // Page until we've pulled every match or hit the safety ceiling. A short
+    // page (fewer rows than requested) means we've reached the end.
+    while (scanned < maxExecutions) {
+      const remaining = maxExecutions - scanned;
+      const maxRecords = Math.min(pageSize, remaining);
+      const response = await this.zapi.get<RawZqlExecutionResponse>('/zql/executeSearch', {
+        params: { zqlQuery: zql, maxRecords, offset },
+      });
+      const rows = response.data?.executions || [];
+      totalMatched = response.data?.totalCount ?? response.data?.executionsCount ?? totalMatched;
+
+      for (const raw of rows) {
+        const row = this.normalizeZqlExecution(raw);
+        const key = row.cycleId ?? `${row.cycleName ?? ''}|${row.versionName ?? ''}`;
+        let group = groups.get(key);
+        if (!group) {
+          group = {
+            cycleId: row.cycleId,
+            cycleName: row.cycleName,
+            versionName: row.versionName,
+            summary: this.emptySummary(),
+            defectKeys: new Set<string>(),
+          };
+          groups.set(key, group);
+        }
+        this.bucketStatus(group.summary, row.status);
+        for (const key of row.defectKeys) group.defectKeys.add(key);
+      }
+
+      scanned += rows.length;
+      offset += rows.length;
+      if (rows.length < maxRecords || scanned >= totalMatched) break;
+    }
+
+    const DEFECT_SAMPLE = 25;
+    const cycles: CycleExecutionAggregate[] = [...groups.values()].map(g => {
+      const s = g.summary;
+      s.passRate = s.total > 0 ? (s.passed / s.total) * 100 : 0;
+      // executed = runs with a verdict; failRate ignores not-yet-run tests so an
+      // unfinished cycle isn't mistaken for a failing one.
+      const executed = s.passed + s.failed + s.blocked;
+      const failRate = executed > 0 ? (s.failed / executed) * 100 : 0;
+      const defectKeys = [...g.defectKeys];
+      return {
+        cycleId: g.cycleId,
+        cycleName: g.cycleName,
+        versionName: g.versionName,
+        summary: s,
+        executed,
+        failRate,
+        defectCount: defectKeys.length,
+        defectKeys: defectKeys.slice(0, DEFECT_SAMPLE),
+      };
+    });
+
+    // Highest fail rate first so quality outliers surface at the top; break ties
+    // by how much was actually executed (a 100% failRate over 20 runs outranks
+    // one over 2), then by defect count.
+    cycles.sort((a, b) =>
+      b.failRate - a.failRate ||
+      b.executed - a.executed ||
+      b.defectCount - a.defectCount
+    );
+
+    return {
+      zql,
+      totalMatched,
+      executionsScanned: scanned,
+      truncated: totalMatched > scanned,
+      cycleCount: cycles.length,
+      cycles,
+    };
+  }
+
+  // Increment the matching summary bucket for a normalized status name.
+  // Mirrors summarizeExecutions but works on the ZQL-mapped status string.
+  private bucketStatus(summary: ZephyrExecutionSummary, status: string): void {
+    summary.total++;
+    switch (status) {
+      case 'PASS': summary.passed++; break;
+      case 'FAIL': summary.failed++; break;
+      case 'BLOCKED': summary.blocked++; break;
+      case 'WIP': summary.inProgress++; break;
+      default: summary.notExecuted++;
+    }
   }
 
   private normalizeZqlExecution(raw: RawZqlExecution): ZephyrExecutionSearchRow {

@@ -22,6 +22,7 @@ The following environment variables are required:
 - `list_test_cycles`: List existing test cycles with execution status
 - `execute_test`: Update test execution results
 - `get_test_execution_status`: Get test execution progress and statistics
+- `aggregate_executions_by_cycle`: Roll up executions by cycle (server-side ZQL + full pagination) for whole-period/outlier analysis; returns per-cycle status breakdown, `failRate`, and defect counts
 - `link_tests_to_issues`: Associate test cases with JIRA issues
 - `generate_test_report`: Generate test execution report
 - `create_test_case`: Create a new test case in Zephyr
